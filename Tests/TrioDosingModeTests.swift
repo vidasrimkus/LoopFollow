@@ -105,6 +105,35 @@ struct TrioDosingModeTests {
         #expect(TrioDosingMode.infoText(undated, now: now) == "Unknown")
     }
 
+    @Test("A time up to 2 min in the future is fresh; beyond that the mode is Unknown")
+    func futureTimestamps() {
+        let slightlyAhead = TrioDosingMode.Reading(raw: "basalTesting", at: now + 60)
+        #expect(TrioDosingMode.status(slightlyAhead, now: now) == .current(.basalTesting))
+        #expect(TrioDosingMode.current(slightlyAhead, now: now) == .basalTesting)
+        #expect(TrioDosingMode.infoText(slightlyAhead, now: now) == "Basal Test")
+        #expect(TrioDosingMode.ageMinutes(slightlyAhead, now: now) == nil) // never "0 min" for a negative age
+
+        let farAhead = TrioDosingMode.Reading(raw: "basalTesting", at: now + 3 * 60)
+        #expect(TrioDosingMode.status(farAhead, now: now) == .future)
+        #expect(TrioDosingMode.current(farAhead, now: now) == nil)
+        #expect(TrioDosingMode.isStale(farAhead, now: now))
+        #expect(TrioDosingMode.infoText(farAhead, now: now) == "Unknown (laikas ateityje)")
+        #expect(TrioDosingMode.ageMinutes(farAhead, now: now) == nil)
+        #expect(TrioDosingMode.confirmationNote(farAhead, now: now) == "Dabartinis režimas nežinomas (laikas ateityje)")
+    }
+
+    @Test("Confirmation note: none for a fresh known mode; unrecognized names the value; stale gives the age")
+    func confirmationNotes() {
+        #expect(TrioDosingMode.confirmationNote(TrioDosingMode.Reading(raw: "open", at: now - 60), now: now) == nil)
+        #expect(TrioDosingMode.confirmationNote(TrioDosingMode.Reading(raw: "autoPilot", at: now - 60), now: now)
+            == "Dabartinis režimas neatpažintas (autoPilot)")
+        #expect(TrioDosingMode.confirmationNote(TrioDosingMode.Reading(raw: "open", at: now - 20 * 60), now: now)
+            == "Dabartinis režimas nežinomas (paskutiniai duomenys prieš 20 min)")
+        #expect(TrioDosingMode.confirmationNote(TrioDosingMode.Reading(raw: "open", at: nil), now: now)
+            == "Dabartinis režimas nežinomas (paskutinių duomenų laikas nežinomas)")
+        #expect(TrioDosingMode.confirmationNote(nil, now: now) == "Dabartinis režimas nežinomas (duomenų nėra)")
+    }
+
     @Test("Unknown dosingMode is not treated as a known mode")
     func unknownValue() {
         let openaps: [String: AnyObject] = ["dosingMode": "teleportation" as AnyObject]

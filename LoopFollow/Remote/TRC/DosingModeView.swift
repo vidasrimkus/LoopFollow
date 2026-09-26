@@ -24,20 +24,30 @@ struct DosingModeView: View {
 
     private var now: TimeInterval { Date().timeIntervalSince1970 }
 
-    /// nil when there is no Trio reading, it is over 15 min old, or the mode is unknown to this build —
-    /// then no row is disabled and every mode can be sent.
+    /// nil unless the Trio reading is fresh and one of the four modes — then no row is disabled and every
+    /// mode can be sent.
     private var currentMode: TrioDosingMode? {
         TrioDosingMode.current(dosingMode.value, now: now)
     }
 
     private var currentModeName: String {
-        if let mode = currentMode { return mode.displayName }
-        guard let reading = dosingMode.value else { return "—" }
-        if TrioDosingMode.isStale(reading, now: now) { return "Unknown" }
-        return reading.raw
+        switch TrioDosingMode.status(dosingMode.value, now: now) {
+        case .none: return "—"
+        case let .current(mode): return mode.displayName
+        case let .unrecognized(raw): return raw
+        case .stale, .future: return "Unknown"
+        }
     }
 
     var body: some View {
+        // Re-evaluated every 30 s while on screen (TimelineView pauses off screen), so a mode that goes stale
+        // with the screen left open turns to Unknown without a tap.
+        TimelineView(.periodic(from: .now, by: 30)) { _ in
+            content
+        }
+    }
+
+    private var content: some View {
         NavigationView {
             VStack {
                 if device.value != "Trio" {
@@ -130,8 +140,15 @@ struct DosingModeView: View {
 
     private var lastUpdateText: String {
         guard let at = dosingMode.value?.at else { return "—" }
-        let minutes = TrioDosingMode.ageMinutes(dosingMode.value, now: now) ?? 0
-        return "\(Localizer.formatTimestampToLocalString(at)) (\(minutes) min ago)"
+        let time = Localizer.formatTimestampToLocalString(at)
+        if let minutes = TrioDosingMode.ageMinutes(dosingMode.value, now: now) {
+            return "\(time) (\(minutes) min ago)"
+        }
+        // Ahead of this phone's clock: never shown as "0 min ago".
+        if TrioDosingMode.status(dosingMode.value, now: now) == .future {
+            return "\(time) (laikas ateityje)"
+        }
+        return "\(time) (just now)"
     }
 
     /// Asked before every send. Switching to Closed Loop gets an extra warning because Trio then doses
@@ -139,12 +156,8 @@ struct DosingModeView: View {
     private var confirmationText: String {
         guard let mode = selectedMode else { return "" }
         var text = "Perjungti \(currentModeName) → \(mode.displayName)?"
-        if currentMode == nil {
-            if let age = TrioDosingMode.ageMinutes(dosingMode.value, now: now) {
-                text += "\n\nDabartinis režimas nežinomas (paskutiniai duomenys prieš \(age) min)"
-            } else {
-                text += "\n\nDabartinis režimas nežinomas (duomenų nėra)"
-            }
+        if let note = TrioDosingMode.confirmationNote(dosingMode.value, now: now) {
+            text += "\n\n" + note
         }
         if mode == .closed {
             text += "\n\nTrio vėl pats duos insulino (korekcijos, SMB)"
