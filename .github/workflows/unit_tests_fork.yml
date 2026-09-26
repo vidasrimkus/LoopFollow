@@ -1,10 +1,14 @@
 # Fork-only (vidasrimkus/LoopFollow): upstream has no unit-test workflow. Runs the "Tests" target
-# of the shared LoopFollow scheme on a simulator, unsigned. Manual start only.
+# of the shared LoopFollow scheme on a simulator, unsigned. Manual start, or a push to feat/**.
 name: zzz Fork unit tests
 run-name: Fork unit tests (${{ github.ref_name }})
 
 on:
   workflow_dispatch:
+  # workflow_dispatch only works once this file is on main; until then a push to a feature branch runs it.
+  push:
+    branches:
+      - 'feat/**'
 
 permissions:
   contents: read
