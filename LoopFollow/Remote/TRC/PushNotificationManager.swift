@@ -88,6 +88,17 @@ class PushNotificationManager {
         sendEncryptedCommand(payload: payload, completion: completion)
     }
 
+    func sendDosingModePushNotification(mode: TrioDosingMode, completion: @escaping (Bool, String?) -> Void) {
+        let payload = CommandPayload(
+            user: user,
+            commandType: .setDosingMode,
+            timestamp: Date().timeIntervalSince1970,
+            dosingMode: mode.rawValue,
+            returnNotification: createReturnNotificationInfo()
+        )
+        sendEncryptedCommand(payload: payload, completion: completion)
+    }
+
     func sendBolusPushNotification(bolusAmount: HKQuantity, completion: @escaping (Bool, String?) -> Void) {
         let bolusAmountDecimal = Decimal(bolusAmount.doubleValue(for: .internationalUnit()))
         let payload = CommandPayload(
@@ -253,7 +264,7 @@ class PushNotificationManager {
             }
 
             let encryptedDataString = try messenger.encrypt(payload)
-            let finalMessage = EncryptedPushMessage(encryptedData: encryptedDataString, commandType: payload.commandType)
+            let finalMessage = EncryptedPushMessage(encryptedData: encryptedDataString, commandType: payload.commandType, dosingMode: payload.dosingMode)
 
             var request = URLRequest(url: url)
             request.httpMethod = "POST"

@@ -7,9 +7,19 @@ struct EncryptedPushMessage: Encodable {
     let aps: APSPayload
     let encryptedData: String
 
-    init(encryptedData: String, commandType: TRCCommandType) {
+    init(encryptedData: String, commandType: TRCCommandType, dosingMode: String? = nil) {
         self.encryptedData = encryptedData
-        aps = APSPayload(alert: "Remote Command: \(commandType.displayName)")
+        aps = APSPayload(alert: Self.alertText(commandType: commandType, dosingMode: dosingMode))
+    }
+
+    /// Visible alert on the Trio phone. set_dosing_mode names the target mode so it is clear what the
+    /// phone is being switched to; every other command keeps its existing text.
+    static func alertText(commandType: TRCCommandType, dosingMode: String?) -> String {
+        if commandType == .setDosingMode, let raw = dosingMode {
+            let name = TrioDosingMode(rawValue: raw)?.displayName ?? raw
+            return "Remote Command: \(commandType.displayName) → \(name)"
+        }
+        return "Remote Command: \(commandType.displayName)"
     }
 
     struct APSPayload: Encodable {
@@ -43,6 +53,9 @@ struct CommandPayload: Encodable {
     var fat: Int?
     var overrideName: String?
     var scheduledTime: TimeInterval?
+    /// set_dosing_mode only: a Trio DosingMode rawValue ("closed", "open", "lowGlucoseSuspend", "basalTesting").
+    /// nil is not encoded, so no other command carries the key.
+    var dosingMode: String?
     var returnNotification: ReturnNotificationInfo?
 
     struct ReturnNotificationInfo: Encodable {
@@ -75,6 +88,7 @@ struct CommandPayload: Encodable {
         case fat
         case overrideName
         case scheduledTime = "scheduled_time"
+        case dosingMode = "dosing_mode"
         case returnNotification = "return_notification"
     }
 }

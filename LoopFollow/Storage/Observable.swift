@@ -50,6 +50,10 @@ class Observable {
     var pumpBatteryLevel = ObservableValue<Double?>(default: nil)
     var dbSizePercentage = ObservableValue<Double?>(default: nil)
     var enactedOrSuggested = ObservableValue<TimeInterval?>(default: nil)
+    /// Trio dosing mode from the newest devicestatus (openaps.dosingMode rawValue), nil when absent.
+    var dosingMode = ObservableValue<String?>(default: nil)
+    /// When that devicestatus was written.
+    var dosingModeUpdatedAt = ObservableValue<TimeInterval?>(default: nil)
 
     var lastSentTOTP = ObservableValue<String?>(default: nil)
 

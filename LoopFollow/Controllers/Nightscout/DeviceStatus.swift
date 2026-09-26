@@ -67,7 +67,7 @@ extension MainViewController {
     func updateDeviceStatusDisplay(jsonDeviceStatus: [[String: AnyObject]]) {
         let previousIOBText = Observable.shared.iobText.value
         let previousDeviceWasLoop = Storage.shared.device.value == "Loop"
-        infoManager.clearInfoData(types: [.iob, .cob, .battery, .pump, .pumpBattery, .target, .isf, .carbRatio, .updated, .recBolus, .tdd])
+        infoManager.clearInfoData(types: [.iob, .cob, .battery, .pump, .pumpBattery, .target, .isf, .carbRatio, .updated, .recBolus, .tdd, .dosingMode])
 
         // For Loop, clear the current override here - For Trio, it is handled using treatments
         if Storage.shared.device.value == "Loop" {
@@ -187,6 +187,9 @@ extension MainViewController {
             }
 
             DeviceStatusLoop(formatter: formatter, lastLoopRecord: lastLoopRecord)
+            // Loop has no dosing mode; drop a value left over from a Trio devicestatus.
+            Observable.shared.dosingMode.value = nil
+            Observable.shared.dosingModeUpdatedAt.value = nil
 
             var oText = ""
             currentOverride = 1.0

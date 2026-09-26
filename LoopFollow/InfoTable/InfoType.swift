@@ -5,6 +5,8 @@ import Foundation
 
 enum InfoType: Int, CaseIterable, Codable {
     case iob, cob, basal, override, battery, pump, pumpBattery, sage, cage, recBolus, minMax, carbsToday, autosens, profile, target, isf, carbRatio, updated, tdd, iage, dbSize
+    // Appended last: rawValue is the storage index of every row, so existing rows must keep theirs.
+    case dosingMode
 
     var name: String {
         switch self {
@@ -29,12 +31,13 @@ enum InfoType: Int, CaseIterable, Codable {
         case .tdd: return "TDD"
         case .iage: return "IAGE"
         case .dbSize: return "DB Size"
+        case .dosingMode: return "Mode"
         }
     }
 
     var defaultVisible: Bool {
         switch self {
-        case .iob, .cob, .basal, .override, .battery, .pump, .sage, .cage, .recBolus, .minMax, .carbsToday:
+        case .iob, .cob, .basal, .override, .battery, .pump, .sage, .cage, .recBolus, .minMax, .carbsToday, .dosingMode:
             return true
         default:
             return false

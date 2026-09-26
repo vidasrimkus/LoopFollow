@@ -7,6 +7,11 @@ import HealthKit
 extension MainViewController {
     func DeviceStatusOpenAPS(formatter: ISO8601DateFormatter, lastDeviceStatus: [String: AnyObject]?, lastLoopRecord: [String: AnyObject]) {
         Storage.shared.device.value = lastDeviceStatus?["device"] as? String ?? ""
+
+        // Dosing mode lives on the openaps record itself, so read it before the suggested/enacted guard below.
+        infoManager.updateInfoData(type: .dosingMode, value: TrioDosingMode.infoText(openaps: lastLoopRecord))
+        Observable.shared.dosingMode.value = lastLoopRecord["dosingMode"] as? String
+        Observable.shared.dosingModeUpdatedAt.value = TrioDosingMode.timestamp(ofDeviceStatus: lastDeviceStatus)
         if lastLoopRecord["failureReason"] != nil {
             Observable.shared.loopStatusText.value = "X"
             latestLoopStatusString = "X"
