@@ -48,26 +48,70 @@ struct TrioDosingModeTests {
         #expect(EncryptedPushMessage.alertText(commandType: .bolus, dosingMode: "closed") == "Remote Command: Bolus")
     }
 
+    private let now: TimeInterval = 1_790_424_000
+
+    private func trioStatus(_ raw: String, at: TimeInterval) -> [String: AnyObject] {
+        let openaps: [String: AnyObject] = ["dosingMode": raw as AnyObject, "iob": ["iob": 0.5] as AnyObject]
+        return ["mills": at * 1000 as AnyObject, "openaps": openaps as AnyObject]
+    }
+
     @Test("devicestatus openaps.dosingMode parses", arguments: TrioDosingMode.allCases)
     func parsesEachMode(mode: TrioDosingMode) {
         let openaps: [String: AnyObject] = ["dosingMode": mode.rawValue as AnyObject]
         #expect(TrioDosingMode.from(openaps: openaps) == mode)
-        #expect(TrioDosingMode.infoText(openaps: openaps) == mode.shortName)
+        let reading = TrioDosingMode.merge(nil, deviceStatus: trioStatus(mode.rawValue, at: now - 60))
+        #expect(reading == TrioDosingMode.Reading(raw: mode.rawValue, at: now - 60))
+        #expect(TrioDosingMode.current(reading, now: now) == mode)
+        #expect(TrioDosingMode.infoText(reading, now: now) == mode.shortName)
     }
 
-    @Test("devicestatus without dosingMode shows a dash")
-    func missingField() {
+    @Test("No reading shows a dash")
+    func noReading() {
         let openaps: [String: AnyObject] = ["iob": ["iob": 0.5] as AnyObject]
         #expect(TrioDosingMode.from(openaps: openaps) == nil)
-        #expect(TrioDosingMode.infoText(openaps: openaps) == "—")
-        #expect(TrioDosingMode.infoText(openaps: nil) == "—")
+        #expect(TrioDosingMode.merge(nil, deviceStatus: ["openaps": openaps as AnyObject]) == nil)
+        #expect(TrioDosingMode.infoText(nil, now: now) == "—")
+        #expect(TrioDosingMode.current(nil, now: now) == nil)
+    }
+
+    @Test("A record without openaps.dosingMode neither changes nor clears the mode")
+    func recordWithoutModeKeepsReading() {
+        let kept = TrioDosingMode.Reading(raw: "basalTesting", at: now - 120)
+        let loopRecord: [String: AnyObject] = ["mills": now * 1000 as AnyObject, "loop": ["iob": ["iob": 1.0]] as AnyObject]
+        let openapsWithoutMode: [String: AnyObject] = ["mills": now * 1000 as AnyObject, "openaps": ["iob": ["iob": 1.0]] as AnyObject]
+        let blankMode: [String: AnyObject] = ["mills": now * 1000 as AnyObject, "openaps": ["dosingMode": ""] as AnyObject]
+        for status in [loopRecord, openapsWithoutMode, blankMode, [:]] {
+            #expect(TrioDosingMode.merge(kept, deviceStatus: status) == kept)
+        }
+        #expect(TrioDosingMode.merge(kept, deviceStatus: nil) == kept)
+        // A Trio record does replace it.
+        #expect(TrioDosingMode.merge(kept, deviceStatus: trioStatus("closed", at: now)) == TrioDosingMode.Reading(raw: "closed", at: now))
+    }
+
+    @Test("Older than 15 min is Unknown, with its age")
+    func staleIsUnknown() {
+        let fresh = TrioDosingMode.Reading(raw: "open", at: now - 15 * 60)
+        #expect(TrioDosingMode.current(fresh, now: now) == .open)
+        #expect(TrioDosingMode.infoText(fresh, now: now) == "Open Loop")
+
+        let stale = TrioDosingMode.Reading(raw: "open", at: now - 15 * 60 - 1)
+        #expect(TrioDosingMode.isStale(stale, now: now))
+        #expect(TrioDosingMode.current(stale, now: now) == nil)
+        #expect(TrioDosingMode.infoText(stale, now: now) == "Unknown (15 min)")
+        #expect(TrioDosingMode.infoText(TrioDosingMode.Reading(raw: "closed", at: now - 47 * 60), now: now) == "Unknown (47 min)")
+
+        let undated = TrioDosingMode.Reading(raw: "closed", at: nil)
+        #expect(TrioDosingMode.current(undated, now: now) == nil)
+        #expect(TrioDosingMode.infoText(undated, now: now) == "Unknown")
     }
 
     @Test("Unknown dosingMode is not treated as a known mode")
     func unknownValue() {
         let openaps: [String: AnyObject] = ["dosingMode": "teleportation" as AnyObject]
         #expect(TrioDosingMode.from(openaps: openaps) == nil)
-        #expect(TrioDosingMode.infoText(openaps: openaps) == "teleportation")
+        let reading = TrioDosingMode.merge(nil, deviceStatus: trioStatus("teleportation", at: now))
+        #expect(TrioDosingMode.current(reading, now: now) == nil)
+        #expect(TrioDosingMode.infoText(reading, now: now) == "teleportation")
     }
 
     @Test("devicestatus timestamp from mills or created_at")

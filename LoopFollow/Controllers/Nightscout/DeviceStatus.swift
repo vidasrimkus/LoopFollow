@@ -187,9 +187,6 @@ extension MainViewController {
             }
 
             DeviceStatusLoop(formatter: formatter, lastLoopRecord: lastLoopRecord)
-            // Loop has no dosing mode; drop a value left over from a Trio devicestatus.
-            Observable.shared.dosingMode.value = nil
-            Observable.shared.dosingModeUpdatedAt.value = nil
 
             var oText = ""
             currentOverride = 1.0
@@ -221,6 +218,10 @@ extension MainViewController {
         if let lastLoopRecord = lastDeviceStatus?["openaps"] as! [String: AnyObject]? {
             DeviceStatusOpenAPS(formatter: formatter, lastDeviceStatus: lastDeviceStatus, lastLoopRecord: lastLoopRecord)
         }
+
+        // Mode row from the remembered reading, not from this record: a record without openaps.dosingMode
+        // (Loop, a second uploader) keeps the last Trio value, shown as Unknown once it is over 15 min old.
+        infoManager.updateInfoData(type: .dosingMode, value: TrioDosingMode.infoText(Observable.shared.dosingMode.value, now: Date().timeIntervalSince1970))
 
         // If the active looping system flipped (Loop ⇄ Trio/OpenAPS), drop the previous
         // system's forecast so it doesn't linger next to the one just drawn above.

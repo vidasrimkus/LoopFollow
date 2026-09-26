@@ -40,11 +40,54 @@ enum TrioDosingMode: String, CaseIterable, Identifiable {
         return TrioDosingMode(rawValue: raw)
     }
 
-    /// Info table text: short name, the raw value for an unknown mode, "—" when there is none.
-    static func infoText(openaps: [String: AnyObject]?) -> String {
-        if let mode = from(openaps: openaps) { return mode.shortName }
-        if let raw = openaps?["dosingMode"] as? String, !raw.isEmpty { return raw }
-        return "—"
+    // MARK: - Remembered reading
+
+    /// A mode is shown as current for this long after the devicestatus that carried it; after that it is Unknown.
+    static let staleAfter: TimeInterval = 15 * 60
+
+    /// The newest mode seen and when the devicestatus that carried it was written.
+    struct Reading: Equatable {
+        let raw: String
+        let at: TimeInterval?
+    }
+
+    /// The reading after a devicestatus arrives. Only a record that carries a non-empty `openaps.dosingMode`
+    /// (a Trio record) replaces it; any other record returns `current` unchanged, so a second uploader on the
+    /// same Nightscout site neither clears the mode nor makes it flicker.
+    static func merge(_ current: Reading?, deviceStatus: [String: AnyObject]?) -> Reading? {
+        let openaps = deviceStatus?["openaps"] as? [String: AnyObject]
+        guard let raw = openaps?["dosingMode"] as? String, !raw.isEmpty else { return current }
+        return Reading(raw: raw, at: timestamp(ofDeviceStatus: deviceStatus))
+    }
+
+    /// Whole minutes since the reading's devicestatus; nil when there is no reading or its time is unknown.
+    static func ageMinutes(_ reading: Reading?, now: TimeInterval) -> Int? {
+        guard let at = reading?.at else { return nil }
+        return max(0, Int((now - at) / 60))
+    }
+
+    /// True when there is a reading but it cannot be trusted as current: older than `staleAfter`, or undated.
+    static func isStale(_ reading: Reading?, now: TimeInterval) -> Bool {
+        guard let reading else { return false }
+        guard let at = reading.at else { return true }
+        return now - at > staleAfter
+    }
+
+    /// The mode to treat as current; nil when there is no reading, it is stale, or it is not one of the four.
+    static func current(_ reading: Reading?, now: TimeInterval) -> TrioDosingMode? {
+        guard let reading, !isStale(reading, now: now) else { return nil }
+        return TrioDosingMode(rawValue: reading.raw)
+    }
+
+    /// Info table text: "—" with no reading, "Unknown (N min)" when stale, else the short name
+    /// (the raw value for a mode this build does not know).
+    static func infoText(_ reading: Reading?, now: TimeInterval) -> String {
+        guard let reading else { return "—" }
+        if isStale(reading, now: now) {
+            if let age = ageMinutes(reading, now: now) { return "Unknown (\(age) min)" }
+            return "Unknown"
+        }
+        return TrioDosingMode(rawValue: reading.raw)?.shortName ?? reading.raw
     }
 
     /// When a devicestatus document was written: `mills` when present, else `created_at`.

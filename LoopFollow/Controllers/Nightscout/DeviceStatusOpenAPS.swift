@@ -9,9 +9,8 @@ extension MainViewController {
         Storage.shared.device.value = lastDeviceStatus?["device"] as? String ?? ""
 
         // Dosing mode lives on the openaps record itself, so read it before the suggested/enacted guard below.
-        infoManager.updateInfoData(type: .dosingMode, value: TrioDosingMode.infoText(openaps: lastLoopRecord))
-        Observable.shared.dosingMode.value = lastLoopRecord["dosingMode"] as? String
-        Observable.shared.dosingModeUpdatedAt.value = TrioDosingMode.timestamp(ofDeviceStatus: lastDeviceStatus)
+        // Only a record that carries openaps.dosingMode changes it; the Info row is set in DeviceStatus.swift.
+        Observable.shared.dosingMode.value = TrioDosingMode.merge(Observable.shared.dosingMode.value, deviceStatus: lastDeviceStatus)
         if lastLoopRecord["failureReason"] != nil {
             Observable.shared.loopStatusText.value = "X"
             latestLoopStatusString = "X"

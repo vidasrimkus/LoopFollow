@@ -23,7 +23,7 @@ struct TrioRemoteControlView: View {
                     CommandButtonView(command: "Bolus", iconName: "syringe", destination: BolusView())
                     CommandButtonView(command: "Temp Target", iconName: "scope", destination: TempTargetView(), isActive: activeTempTarget.value != nil)
                     CommandButtonView(command: "Overrides", iconName: "slider.horizontal.3", destination: OverrideView(), isActive: activeOverrideNote.value != nil)
-                    CommandButtonView(command: "Dosing Mode", iconName: "dial.medium", destination: DosingModeView(), isActive: dosingMode.value != nil && dosingMode.value != TrioDosingMode.closed.rawValue)
+                    CommandButtonView(command: "Dosing Mode", iconName: "dial.medium", destination: DosingModeView(), isActive: isNonClosedMode)
                 }
                 .padding(.horizontal)
 
@@ -31,6 +31,12 @@ struct TrioRemoteControlView: View {
             }
             .navigationBarTitle("Trio Remote Control", displayMode: .inline)
         }
+    }
+
+    /// Glow on the Dosing Mode button while Trio is known (fresh data) to be in a mode other than Closed Loop.
+    private var isNonClosedMode: Bool {
+        guard let mode = TrioDosingMode.current(dosingMode.value, now: Date().timeIntervalSince1970) else { return false }
+        return mode != .closed
     }
 }
 

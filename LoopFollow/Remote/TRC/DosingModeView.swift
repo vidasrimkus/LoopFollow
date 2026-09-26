@@ -9,7 +9,6 @@ struct DosingModeView: View {
 
     @ObservedObject var device = Storage.shared.device
     @ObservedObject var dosingMode = Observable.shared.dosingMode
-    @ObservedObject var dosingModeUpdatedAt = Observable.shared.dosingModeUpdatedAt
 
     @State private var showAlert: Bool = false
     @State private var alertType: AlertType? = nil
@@ -23,13 +22,19 @@ struct DosingModeView: View {
         case statusFailure
     }
 
+    private var now: TimeInterval { Date().timeIntervalSince1970 }
+
+    /// nil when there is no Trio reading, it is over 15 min old, or the mode is unknown to this build —
+    /// then no row is disabled and every mode can be sent.
     private var currentMode: TrioDosingMode? {
-        dosingMode.value.flatMap(TrioDosingMode.init(rawValue:))
+        TrioDosingMode.current(dosingMode.value, now: now)
     }
 
     private var currentModeName: String {
         if let mode = currentMode { return mode.displayName }
-        return dosingMode.value ?? "—"
+        guard let reading = dosingMode.value else { return "—" }
+        if TrioDosingMode.isStale(reading, now: now) { return "Unknown" }
+        return reading.raw
     }
 
     var body: some View {
@@ -124,8 +129,8 @@ struct DosingModeView: View {
     }
 
     private var lastUpdateText: String {
-        guard let at = dosingModeUpdatedAt.value else { return "—" }
-        let minutes = max(0, Int((Date().timeIntervalSince1970 - at) / 60))
+        guard let at = dosingMode.value?.at else { return "—" }
+        let minutes = TrioDosingMode.ageMinutes(dosingMode.value, now: now) ?? 0
         return "\(Localizer.formatTimestampToLocalString(at)) (\(minutes) min ago)"
     }
 
@@ -134,6 +139,17 @@ struct DosingModeView: View {
     private var confirmationText: String {
         guard let mode = selectedMode else { return "" }
         var text = "Perjungti \(currentModeName) → \(mode.displayName)?"
+        if currentMode == nil {
+            if let age = TrioDosingMode.ageMinutes(dosingMode.value, now: now) {
+                text += "
+
+Dabartinis režimas nežinomas (paskutiniai duomenys prieš \(age) min)"
+            } else {
+                text += "
+
+Dabartinis režimas nežinomas (duomenų nėra)"
+            }
+        }
         if mode == .closed {
             text += "\n\nTrio vėl pats duos insulino (korekcijos, SMB)"
         }
