@@ -141,13 +141,9 @@ struct DosingModeView: View {
         var text = "Perjungti \(currentModeName) → \(mode.displayName)?"
         if currentMode == nil {
             if let age = TrioDosingMode.ageMinutes(dosingMode.value, now: now) {
-                text += "
-
-Dabartinis režimas nežinomas (paskutiniai duomenys prieš \(age) min)"
+                text += "\n\nDabartinis režimas nežinomas (paskutiniai duomenys prieš \(age) min)"
             } else {
-                text += "
-
-Dabartinis režimas nežinomas (duomenų nėra)"
+                text += "\n\nDabartinis režimas nežinomas (duomenų nėra)"
             }
         }
         if mode == .closed {
