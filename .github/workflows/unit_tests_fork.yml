@@ -26,6 +26,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: List available simulators
+        run: xcrun simctl list devices available
+
       - name: Test
         run: |
           set -o pipefail
@@ -33,7 +36,7 @@ jobs:
             -workspace LoopFollow.xcworkspace \
             -scheme LoopFollow \
             -only-testing:Tests \
-            -destination "platform=iOS Simulator,name=iPhone 17" \
+            -destination "platform=iOS Simulator,name=iPhone 17,OS=26.2" \
             CODE_SIGNING_ALLOWED=NO \
             | tee xcodebuild-test.log
 
