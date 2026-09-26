@@ -1,0 +1,38 @@
+# Fork-only (vidasrimkus/LoopFollow): upstream has no unit-test workflow. Runs the "Tests" target
+# of the shared LoopFollow scheme on a simulator, unsigned. Manual start only.
+name: zzz Fork unit tests
+run-name: Fork unit tests (${{ github.ref_name }})
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Unit Tests
+    runs-on: macos-26
+    steps:
+      - name: Select Xcode version
+        run: sudo xcode-select --switch /Applications/Xcode_26.2.app/Contents/Developer
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -workspace LoopFollow.xcworkspace \
+            -scheme LoopFollow \
+            -only-testing:Tests \
+            -destination "platform=iOS Simulator,name=iPhone 17" \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee xcodebuild-test.log
+
+      - name: Surface errors
+        if: failure()
+        run: grep -nE "error:|✘|failed|BUILD FAILED|TEST FAILED" xcodebuild-test.log | tail -n 80 || true
