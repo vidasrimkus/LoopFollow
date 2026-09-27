@@ -21,20 +21,34 @@ struct BasalProfileTests {
 
     // MARK: Hash — must equal Trio
 
-    @Test("Hash of Nightscout entries equals Trio's vectors")
+    @Test("Hash of Nightscout entries equals Trio's vectors (CUSTOMIZATIONS.md §7)")
     func trioVectors() {
-        #expect(BasalProfileMath.hash(ofNightscout: vector1NS) == "fd950334d8df0b65")
-        #expect(BasalProfileMath.hash(ofNightscout: [(0, 1.0)]) == "cb753f988e32a89d")
-        #expect(BasalProfileMath.hash(ofNightscout: [(0, 0.35), (25200, 1.2), (79200, 0.45)]) == "aa5480f602dbc4d4")
-        #expect(BasalProfileMath.hash(ofNightscout: Array(vector1NS.reversed())) == "fd950334d8df0b65")
+        #expect(BasalProfileMath.hash(ofNightscout: vector1NS) == "5c367b5397636149") // V1
+        #expect(BasalProfileMath.hash(ofNightscout: [(0, 1.0)]) == "946f8ef5ec7fc61e") // V2
+        #expect(BasalProfileMath.hash(ofNightscout: [(0, 0.35), (25200, 1.2), (79200, 0.45)]) == "eabd566dccabc3e6") // V3
+        #expect(BasalProfileMath.hash(ofNightscout: [(0, 0.4), (9000, 0.5), (18000, 0.6)]) == "acff0d328fca2e73") // V4, 02:30
+        #expect(BasalProfileMath.hash(ofNightscout: [(0, 0.4), (7200, 0.55)]) == "b692201fbdc3d38e") // V5
+        #expect(BasalProfileMath.hash(ofNightscout: Array(vector1NS.reversed())) == "5c367b5397636149")
+    }
+
+    @Test("Hash depends on the schedule, not on how it is split")
+    func hashIgnoresSplitting() {
+        // [02:00 0.55, 03:00 0.55] == [02:00 0.55]
+        #expect(BasalProfileMath.hash(ofNightscout: [(0, 0.4), (7200, 0.55), (10800, 0.55)]) == "b692201fbdc3d38e")
+        // Trio's stored V1 (with repeats) == V1 merged == the same 24 hourly rates.
+        let v1Hourly = BasalProfileMath.hourly(fromNightscout: vector1NS)!
+        #expect(BasalProfileMath.hash(ofSegments: BasalProfileMath.segments(v1Hourly)) == "5c367b5397636149")
+        #expect(BasalProfileMath.hash(ofHourly: v1Hourly) == "5c367b5397636149")
+        // 30-minute segments: stable under reordering and redundant entries.
+        #expect(BasalProfileMath.hash(ofNightscout: [(18000, 0.6), (0, 0.4), (9000, 0.5), (10800, 0.5)]) == "acff0d328fca2e73")
+        #expect(BasalProfileMath.halfHourSlots([(minutes: 0, cents: 40), (minutes: 150, cents: 50)]).count == 48)
     }
 
     @Test("Hash of the segments this app sends uses the same algorithm")
     func sentSegmentsHash() {
-        #expect(BasalProfileMath.hash(ofSegments: BasalProfileMath.segments(Array(repeating: d("1.00"), count: 24))) == "cb753f988e32a89d")
-        #expect(BasalProfileMath.hash(ofSegments: BasalProfileMath.segments(hourly([(0, "0.35"), (7, "1.2"), (22, "0.45")]))) == "aa5480f602dbc4d4")
-        // Merged vector 1 ("0:40;120:55;300:60;600:70;780:40;1140:45") differs from Trio's stored form with repeats.
-        #expect(BasalProfileMath.hash(ofSegments: BasalProfileMath.segments(BasalProfileMath.hourly(fromNightscout: vector1NS)!)) == "031372d0b50f4a30")
+        #expect(BasalProfileMath.hash(ofSegments: BasalProfileMath.segments(Array(repeating: d("1.00"), count: 24))) == "946f8ef5ec7fc61e")
+        #expect(BasalProfileMath.hash(ofSegments: BasalProfileMath.segments(hourly([(0, "0.35"), (7, "1.2"), (22, "0.45")]))) == "eabd566dccabc3e6")
+        #expect(BasalProfileMath.hash(ofHourly: hourly([(0, "0.4"), (2, "0.55")])) == "b692201fbdc3d38e")
     }
 
     // MARK: Segments and conversion

@@ -61,24 +61,37 @@ enum BasalProfileMath {
         return hourly
     }
 
-    // MARK: Hash (identical to Trio RemoteBasalSchedule.hash)
+    // MARK: Hash (identical to Trio RemoteBasalSchedule.hash — Trio CUSTOMIZATIONS.md §7)
 
-    /// Canonical `"<minutes from midnight>:<rate in hundredths>"` per entry in start order, joined with ";";
-    /// hash = lowercase hex of the first 8 bytes of SHA-256 over the UTF-8 bytes.
-    static func hash(canonicalEntries entries: [(minutes: Int, cents: Int)]) -> String {
-        let canonical = entries.sorted { $0.minutes < $1.minutes }.map { "\($0.minutes):\($0.cents)" }.joined(separator: ";")
+    /// The rate in force at each of the 48 half-hours 00:00 … 23:30, in whole hundredths: the entry with the
+    /// latest start at or before that minute; before the first entry, the last entry (a daily schedule wraps).
+    static func halfHourSlots(_ entries: [(minutes: Int, cents: Int)]) -> [Int] {
+        let sorted = entries.sorted { $0.minutes < $1.minutes }
+        guard let last = sorted.last else { return [] }
+        return (0 ..< 48).map { slot in (sorted.last(where: { $0.minutes <= slot * 30 }) ?? last).cents }
+    }
+
+    /// The 48 half-hour values joined with ";"; hash = lowercase hex of the first 8 bytes of SHA-256 over the
+    /// UTF-8 bytes. Depends on what the schedule delivers, not on how it is split into entries.
+    static func hash(entries: [(minutes: Int, cents: Int)]) -> String {
+        let canonical = halfHourSlots(entries).map(String.init).joined(separator: ";")
         return SHA256.hash(data: Data(canonical.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Hash of the schedule this app would send (merged segments).
-    static func hash(ofSegments segments: [BasalScheduleSegment]) -> String {
-        hash(canonicalEntries: segments.map { (minutes: (Int($0.start.prefix(2)) ?? 0) * 60, cents: roundedCents($0.rate)) })
+    /// Hash of a profile's 24 hourly rates.
+    static func hash(ofHourly hourly: [Decimal]) -> String {
+        hash(entries: hourly.enumerated().map { (minutes: $0.offset * 60, cents: roundedCents($0.element)) })
     }
 
-    /// Hash of Trio's active schedule as Nightscout shows it — entries exactly as stored, not merged, because
-    /// Trio hashes its own stored entries. This is the value for `expected_active_hash`.
+    /// Hash of the schedule this app would send (merged segments) — equal to `hash(ofHourly:)` of the same rates.
+    static func hash(ofSegments segments: [BasalScheduleSegment]) -> String {
+        hash(entries: segments.map { (minutes: (Int($0.start.prefix(2)) ?? 0) * 60, cents: roundedCents($0.rate)) })
+    }
+
+    /// Hash of Trio's active schedule as Nightscout shows it (any split, including 30-minute segments).
+    /// This is the value for `expected_active_hash`.
     static func hash(ofNightscout entries: [(seconds: Int, rate: Double)]) -> String {
-        hash(canonicalEntries: entries.map { (minutes: $0.seconds / 60, cents: cents(fromDouble: $0.rate)) })
+        hash(entries: entries.map { (minutes: $0.seconds / 60, cents: cents(fromDouble: $0.rate)) })
     }
 
     // MARK: Totals

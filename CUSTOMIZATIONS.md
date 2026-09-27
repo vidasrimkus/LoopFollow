@@ -62,8 +62,8 @@ vidasrimkus/Trio CUSTOMIZATIONS.md §7, Dana only).
 
 | File | Change |
 |---|---|
-| `LoopFollow/Remote/TRC/BasalProfiles/BasalProfile.swift` | New. `BasalProfile` (id, name, 24 hourly rates, created/updated); `BasalProfileMath`: merge into segments, Nightscout → 24 hours (refuses off-hour schedules), hash identical to Trio's, daily total, % change, the same validation as Trio (name, > 0, whole hundredths, Dana `Decimal → Double(truncating:) → UInt16(*100)` check with the nearest exact rates). |
-| `LoopFollow/Remote/TRC/BasalProfiles/BasalProfilesView.swift` | New. List (U/d, ✓ when the 24 rates equal Nightscout's active schedule), Edit / Copy / Delete (not the active one), "Išsaugoti dabartinį kaip…", JSON export/import (file exporter/importer); editor (24 rows, 0.01 U/h); activation (hour \| now \| new \| Δ table, total A → B (±N %), confirmation text and expected hash fixed when the dialog opens, extra warning above 20 %, stale-data warning (> 15 min or none), "Ankstesnis (YYYY-MM-DD HH:MM)" saved before every send unless the same 24 rates are already saved, "Kartoti" re-sends the identical command). |
+| `LoopFollow/Remote/TRC/BasalProfiles/BasalProfile.swift` | New. `BasalProfile` (id, name, 24 hourly rates, created/updated); `BasalProfileMath`: merge into segments, Nightscout → 24 hours (refuses off-hour schedules), hash identical to Trio's (48 half-hour values, independent of how the schedule is split — Trio CUSTOMIZATIONS.md §7), daily total, % change, the same validation as Trio (name, > 0, whole hundredths, Dana `Decimal → Double(truncating:) → UInt16(*100)` check with the nearest exact rates). |
+| `LoopFollow/Remote/TRC/BasalProfiles/BasalProfilesView.swift` | New. List (U/d, ✓ when the profile's hash equals the hash of Nightscout's active schedule), Edit / Copy / Delete (not the active one), "Išsaugoti dabartinį kaip…", JSON export/import (file exporter/importer); editor (24 rows, 0.01 U/h); activation (hour \| now \| new \| Δ table, total A → B (±N %), confirmation text and expected hash fixed when the dialog opens, extra warning above 20 %, stale-data warning (> 15 min or none), "Ankstesnis (YYYY-MM-DD HH:MM)" saved before every send unless a saved profile already has the active schedule's hash, "Kartoti" re-sends the identical command). |
 | `LoopFollow/Remote/TRC/TRCCommandType.swift`, `PushMessage.swift`, `PushNotificationManager.swift` | `setBasalSchedule`; `basal_schedule`, `basal_schedule_name`, `expected_active_hash` (nil not encoded); send through the existing `sendEncryptedCommand`. |
 | `LoopFollow/Remote/TRC/TrioRemoteControlView.swift` | "Basal Profiles" button (Trio Remote Control only). |
 | `LoopFollow/Storage/Storage.swift`, `Observable.swift`, `Controllers/Nightscout/Profile.swift` | `basalProfiles` storage; `nsProfileLoadedAt` set when the Nightscout profile loads. |
@@ -74,7 +74,8 @@ schedule with the same expected hash is safe on the Trio side). Omnipod DASH is 
 it. The existing QR settings export is not extended (several profiles would exceed a QR code); profiles are
 exported/imported as a JSON file from the Basal Profiles screen.
 
-**Tests.** `Tests/BasalProfileTests.swift`: Trio hash vectors (Nightscout form and sent segments), merge,
+**Tests.** `Tests/BasalProfileTests.swift`: Trio hash vectors V1–V5 (Nightscout form, sent segments, hourly;
+split-independence incl. [02:00 0.55, 03:00 0.55] == [02:00 0.55] and 30-minute segments), merge,
 Nightscout → 24 h, the Trio validation examples (0.29, 1.15, 2.05, 2.30 refused; 0.57 and everyday rates pass),
 totals, JSON, whole APNS body < 4 KB with 24 segments and a 30-character name, storage round trip.
 
@@ -94,7 +95,7 @@ target of the shared `LoopFollow` scheme on an iPhone 17 / iOS 26.2 simulator, u
 | LoopFollow → Trio | `vidasrimkus/Trio` accepts `command_type: "set_dosing_mode"` with `dosing_mode` = `closed`, `open`, `lowGlucoseSuspend`, `basalTesting` — must match Trio's `DosingMode` rawValue exactly. |
 | Trio → LoopFollow | The result arrives only as Trio's return push notification ("Dosing mode: X → Y" / "Already in Y"). LoopFollow shows it as a notification and **deliberately does not parse it**. |
 | Nightscout → LoopFollow | devicestatus `openaps.dosingMode` (same field t1d-monitor reads). |
-| LoopFollow → Trio (branch `feat/basal-profiles`, not on main yet) | `command_type: "set_basal_schedule"` with `basal_schedule` = `[{"start":"HH:00","rate":<U/h>}]` (adjacent equal hours merged), `basal_schedule_name`, `expected_active_hash` = hash of Nightscout `store.default.basal` entries as stored (Trio CUSTOMIZATIONS.md §7 algorithm and vectors). Trio accepts it only with a Dana; its result arrives only as the push notification. |
+| LoopFollow → Trio (branch `feat/basal-profiles`, not on main yet) | `command_type: "set_basal_schedule"` with `basal_schedule` = `[{"start":"HH:00","rate":<U/h>}]` (adjacent equal hours merged), `basal_schedule_name`, `expected_active_hash` = hash of Nightscout `store.default.basal` (48 half-hour values, independent of how the schedule is split; Trio CUSTOMIZATIONS.md §7 algorithm and vectors V1–V5, tested on both sides). Sending the schedule that is already active gets "Already active" from Trio, however either side splits it. Trio accepts it only with a Dana; its result arrives only as the push notification. |
 | Nightscout → LoopFollow (basal) | Profile `store.default.basal` (`ProfileManager.basalSchedule`) = Trio's active schedule; used for ✓, comparison, "Ankstesnis" and the expected hash. |
 
 If any of these contracts changes, `vidasrimkus/Trio` and `t1d-monitor` must change too.

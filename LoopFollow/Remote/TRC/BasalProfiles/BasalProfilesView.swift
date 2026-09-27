@@ -61,7 +61,7 @@ struct BasalProfilesDocument: FileDocument {
     }
 
     func fileWrapper(configuration _: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: try Self.encoder.encode(profiles))
+        try FileWrapper(regularFileWithContents: Self.encoder.encode(profiles))
     }
 
     static var encoder: JSONEncoder {
@@ -118,7 +118,7 @@ struct BasalProfilesView: View {
                     Text("Išsaugotų profilių nėra.").foregroundColor(.secondary)
                 }
                 ForEach(profiles.value) { profile in
-                    let isActive = active.hourly == profile.hourlyRates
+                    let isActive = active.hash == BasalProfileMath.hash(ofHourly: profile.hourlyRates)
                     NavigationLink(destination: BasalProfileActivationView(profile: profile)) {
                         HStack {
                             VStack(alignment: .leading) {
@@ -162,8 +162,12 @@ struct BasalProfilesView: View {
         .alert(message ?? "", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("OK", role: .cancel) {}
         }
-        .fileExporter(isPresented: $showExporter, document: BasalProfilesDocument(profiles: profiles.value),
-                      contentType: .json, defaultFilename: "basal-profiles") { result in
+        .fileExporter(
+            isPresented: $showExporter,
+            document: BasalProfilesDocument(profiles: profiles.value),
+            contentType: .json,
+            defaultFilename: "basal-profiles"
+        ) { result in
             if case let .failure(error) = result { message = "Eksportas nepavyko: \(error.localizedDescription)" }
         }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json]) { result in importProfiles(result) }
@@ -185,7 +189,7 @@ struct BasalProfilesView: View {
     }
 
     private func delete(_ profile: BasalProfile) {
-        guard active.hourly != profile.hourlyRates else { return } // the active one is never deleted
+        guard active.hash != BasalProfileMath.hash(ofHourly: profile.hourlyRates) else { return } // never the active one
         profiles.value.removeAll { $0.id == profile.id }
     }
 
@@ -389,7 +393,9 @@ struct BasalProfileActivationView: View {
     /// Before every activation the schedule being replaced is kept as "Ankstesnis (YYYY-MM-DD HH:MM)", unless a
     /// saved profile with the same 24 rates already exists.
     private func saveCurrentAsPrevious() {
-        guard let hourly = active.hourly, !profiles.value.contains(where: { $0.hourlyRates == hourly }) else { return }
+        guard let hourly = active.hourly,
+              !profiles.value.contains(where: { BasalProfileMath.hash(ofHourly: $0.hourlyRates) == active.hash })
+        else { return }
         profiles.value.append(BasalProfile(name: "Ankstesnis (\(BasalProfileFormat.stamp(Date())))", hourlyRates: hourly))
     }
 
