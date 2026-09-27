@@ -53,6 +53,8 @@ class Observable {
     /// Trio dosing mode from the newest devicestatus that carried openaps.dosingMode, with that record's time.
     /// Records without the field leave it unchanged (TrioDosingMode.merge).
     var dosingMode = ObservableValue<TrioDosingMode.Reading?>(default: nil)
+    /// When the Nightscout profile (Trio's active basal schedule) was last loaded.
+    var nsProfileLoadedAt = ObservableValue<TimeInterval?>(default: nil)
 
     var lastSentTOTP = ObservableValue<String?>(default: nil)
 

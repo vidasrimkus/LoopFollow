@@ -32,6 +32,7 @@ extension MainViewController {
             return
         }
         profileManager.loadProfile(from: profileData)
+        Observable.shared.nsProfileLoadedAt.value = Date().timeIntervalSince1970
         infoManager.updateInfoData(type: .profile, value: profileData.defaultProfile)
         Storage.shared.lastProfileName.value = profileData.defaultProfile
 

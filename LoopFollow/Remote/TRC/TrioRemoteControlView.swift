@@ -24,6 +24,7 @@ struct TrioRemoteControlView: View {
                     CommandButtonView(command: "Temp Target", iconName: "scope", destination: TempTargetView(), isActive: activeTempTarget.value != nil)
                     CommandButtonView(command: "Overrides", iconName: "slider.horizontal.3", destination: OverrideView(), isActive: activeOverrideNote.value != nil)
                     CommandButtonView(command: "Dosing Mode", iconName: "dial.medium", destination: DosingModeView(), isActive: isNonClosedMode)
+                    CommandButtonView(command: "Basal Profiles", iconName: "chart.bar.xaxis", destination: BasalProfilesView())
                 }
                 .padding(.horizontal)
 

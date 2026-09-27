@@ -99,6 +99,23 @@ class PushNotificationManager {
         sendEncryptedCommand(payload: payload, completion: completion)
     }
 
+    /// The set_basal_schedule payload (also used by the size test).
+    func basalSchedulePayload(profile: BasalProfile, expectedActiveHash: String) -> CommandPayload {
+        CommandPayload(
+            user: user,
+            commandType: .setBasalSchedule,
+            timestamp: Date().timeIntervalSince1970,
+            basalSchedule: BasalProfileMath.segments(profile.hourlyRates),
+            basalScheduleName: profile.name.trimmingCharacters(in: .whitespaces),
+            expectedActiveHash: expectedActiveHash,
+            returnNotification: createReturnNotificationInfo()
+        )
+    }
+
+    func sendBasalSchedulePushNotification(profile: BasalProfile, expectedActiveHash: String, completion: @escaping (Bool, String?) -> Void) {
+        sendEncryptedCommand(payload: basalSchedulePayload(profile: profile, expectedActiveHash: expectedActiveHash), completion: completion)
+    }
+
     func sendBolusPushNotification(bolusAmount: HKQuantity, completion: @escaping (Bool, String?) -> Void) {
         let bolusAmountDecimal = Decimal(bolusAmount.doubleValue(for: .internationalUnit()))
         let payload = CommandPayload(

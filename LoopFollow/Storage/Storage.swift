@@ -108,6 +108,8 @@ class Storage {
     var lastCarbRatio = StorageValue<Double?>(key: "lastCarbRatio", defaultValue: nil)
     var lastCarbsToday = StorageValue<Double?>(key: "lastCarbsToday", defaultValue: nil)
     var lastProfileName = StorageValue<String>(key: "lastProfileName", defaultValue: "")
+    /// Named basal schedules for Trio Remote Control (set_basal_schedule). Kept only on this phone.
+    var basalProfiles = StorageValue<[BasalProfile]>(key: "basalProfiles", defaultValue: [])
     var iageInsertTime = StorageValue<TimeInterval>(key: "iageInsertTime", defaultValue: 0)
     var lastMinBgMgdl = StorageValue<Double?>(key: "lastMinBgMgdl", defaultValue: nil)
     var lastMaxBgMgdl = StorageValue<Double?>(key: "lastMaxBgMgdl", defaultValue: nil)

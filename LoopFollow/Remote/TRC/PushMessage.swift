@@ -56,6 +56,11 @@ struct CommandPayload: Encodable {
     /// set_dosing_mode only: a Trio DosingMode rawValue ("closed", "open", "lowGlucoseSuspend", "basalTesting").
     /// nil is not encoded, so no other command carries the key.
     var dosingMode: String?
+    /// set_basal_schedule only (Trio CUSTOMIZATIONS.md §7): the schedule, its name, and the hash of Trio's active
+    /// schedule as this phone saw it in Nightscout. nil is not encoded.
+    var basalSchedule: [BasalScheduleSegment]?
+    var basalScheduleName: String?
+    var expectedActiveHash: String?
     var returnNotification: ReturnNotificationInfo?
 
     struct ReturnNotificationInfo: Encodable {
@@ -89,6 +94,9 @@ struct CommandPayload: Encodable {
         case overrideName
         case scheduledTime = "scheduled_time"
         case dosingMode = "dosing_mode"
+        case basalSchedule = "basal_schedule"
+        case basalScheduleName = "basal_schedule_name"
+        case expectedActiveHash = "expected_active_hash"
         case returnNotification = "return_notification"
     }
 }

@@ -11,6 +11,7 @@ enum TRCCommandType: String, Encodable {
     case startOverride = "start_override"
     case cancelOverride = "cancel_override"
     case setDosingMode = "set_dosing_mode"
+    case setBasalSchedule = "set_basal_schedule"
 
     var displayName: String {
         switch self {
@@ -21,6 +22,7 @@ enum TRCCommandType: String, Encodable {
         case .startOverride: return "Start Override"
         case .cancelOverride: return "Cancel Override"
         case .setDosingMode: return "Dosing Mode"
+        case .setBasalSchedule: return "Basal Schedule"
         }
     }
 }
