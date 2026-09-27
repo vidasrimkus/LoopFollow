@@ -133,6 +133,20 @@ enum TrioDosingMode: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Whether a mode row in DosingModeView can be tapped. Every mode, including the one shown as current, can
+    /// be sent — the displayed mode comes from Nightscout and can lag behind Trio; only an in-flight send
+    /// blocks the rows.
+    static func isRowEnabled(isLoading: Bool) -> Bool {
+        !isLoading
+    }
+
+    /// Extra confirmation line when the chosen mode is the one the data says Trio is already in; nil otherwise.
+    static func sameModeNote(selected: TrioDosingMode, reading: Reading?, now: TimeInterval) -> String? {
+        guard current(reading, now: now) == selected else { return nil }
+        let age = ageMinutes(reading, now: now).map { "prieš \($0) min" } ?? "ką tik"
+        return "Pagal duomenis (\(age)) Trio jau šiame režime. Siųsti vis tiek?"
+    }
+
     /// When a devicestatus document was written: `mills` when present, else `created_at`.
     static func timestamp(ofDeviceStatus status: [String: AnyObject]?) -> TimeInterval? {
         if let mills = status?["mills"] as? Double { return mills / 1000 }

@@ -24,8 +24,8 @@ struct DosingModeView: View {
 
     private var now: TimeInterval { Date().timeIntervalSince1970 }
 
-    /// nil unless the Trio reading is fresh and one of the four modes — then no row is disabled and every
-    /// mode can be sent.
+    /// nil unless the Trio reading is fresh and one of the four modes. Marks the ✓ row; every row stays
+    /// sendable (the displayed mode can be out of date).
     private var currentMode: TrioDosingMode? {
         TrioDosingMode.current(dosingMode.value, now: now)
     }
@@ -90,8 +90,9 @@ struct DosingModeView: View {
                                         }
                                     }
                                 }
-                                // The current mode is shown but cannot be sent again.
-                                .disabled(mode == currentMode || isLoading)
+                                // Every mode can be sent, the ✓ one too: the displayed mode comes from
+                                // Nightscout and can lag behind Trio. Only an in-flight send disables rows.
+                                .disabled(!TrioDosingMode.isRowEnabled(isLoading: isLoading))
                             }
                         }
                     }
@@ -157,6 +158,9 @@ struct DosingModeView: View {
         guard let mode = selectedMode else { return "" }
         var text = "Perjungti \(currentModeName) → \(mode.displayName)?"
         if let note = TrioDosingMode.confirmationNote(dosingMode.value, now: now) {
+            text += "\n\n" + note
+        }
+        if let note = TrioDosingMode.sameModeNote(selected: mode, reading: dosingMode.value, now: now) {
             text += "\n\n" + note
         }
         if mode == .closed {

@@ -134,6 +134,29 @@ struct TrioDosingModeTests {
         #expect(TrioDosingMode.confirmationNote(nil, now: now) == "Dabartinis režimas nežinomas (duomenų nėra)")
     }
 
+    @Test("The current mode's row stays enabled and its confirmation asks to send anyway", arguments: TrioDosingMode.allCases)
+    func currentModeRowEnabled(mode: TrioDosingMode) {
+        let reading = TrioDosingMode.Reading(raw: mode.rawValue, at: now - 4 * 60)
+        #expect(TrioDosingMode.current(reading, now: now) == mode) // shown with ✓
+        #expect(TrioDosingMode.isRowEnabled(isLoading: false))
+        #expect(!TrioDosingMode.isRowEnabled(isLoading: true))
+        #expect(TrioDosingMode.sameModeNote(selected: mode, reading: reading, now: now)
+            == "Pagal duomenis (prieš 4 min) Trio jau šiame režime. Siųsti vis tiek?")
+        for other in TrioDosingMode.allCases where other != mode {
+            #expect(TrioDosingMode.sameModeNote(selected: other, reading: reading, now: now) == nil)
+        }
+    }
+
+    @Test("No same-mode line when the data is stale, missing or slightly ahead says 'ką tik'")
+    func sameModeNoteEdges() {
+        let stale = TrioDosingMode.Reading(raw: "open", at: now - 20 * 60)
+        #expect(TrioDosingMode.sameModeNote(selected: .open, reading: stale, now: now) == nil)
+        #expect(TrioDosingMode.sameModeNote(selected: .open, reading: nil, now: now) == nil)
+        let slightlyAhead = TrioDosingMode.Reading(raw: "open", at: now + 60)
+        #expect(TrioDosingMode.sameModeNote(selected: .open, reading: slightlyAhead, now: now)
+            == "Pagal duomenis (ką tik) Trio jau šiame režime. Siųsti vis tiek?")
+    }
+
     @Test("Unknown dosingMode is not treated as a known mode")
     func unknownValue() {
         let openaps: [String: AnyObject] = ["dosingMode": "teleportation" as AnyObject]
