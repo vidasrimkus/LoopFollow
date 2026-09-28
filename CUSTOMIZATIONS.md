@@ -67,7 +67,7 @@ vidasrimkus/Trio CUSTOMIZATIONS.md §7, Dana only).
 | `LoopFollow/Remote/TRC/TRCCommandType.swift`, `PushMessage.swift`, `PushNotificationManager.swift` | `setBasalSchedule`; `basal_schedule`, `basal_schedule_name`, `expected_active_hash` (nil not encoded); send through the existing `sendEncryptedCommand`. |
 | `LoopFollow/Remote/TRC/TrioRemoteControlView.swift` | "Basal Profiles" button (Trio Remote Control only). All six TRC buttons open their screen through `@State selection` and hidden links outside the `LazyVGrid` (`fix/basal-editor-dismiss`): links inside the lazy grid lost their pushed screen when a devicestatus redrew the grid (dosingMode / device publish on every record), closing an open editor or confirmation. `CommandButtonView` is kept for Loop APNS; its look is `CommandTile`. |
 | `LoopFollow/Remote/TRC/DosingModeView.swift` | (`fix/basal-editor-dismiss`) confirmation text fixed at the tap, not recomputed by the 30 s timeline or devicestatus. |
-| `LoopFollow/Storage/Storage.swift`, `Observable.swift`, `Controllers/Nightscout/Profile.swift` | `basalProfiles` storage; `nsProfileLoadedAt` set when the Nightscout profile loads. |
+| `LoopFollow/Storage/Storage.swift`, `Observable.swift`, `Controllers/Nightscout/Profile.swift` | `basalProfiles` and `activeBasalProfileID` storage; `nsProfileLoadedAt` set when the Nightscout profile loads. |
 
 **Notes.** Max Basal is not shown: Trio does not publish it in the Nightscout profile — Trio enforces it.
 LoopFollow does not parse Trio's reply, so "Kartoti" is always offered after a send (re-sending the same
@@ -79,7 +79,13 @@ The list does not observe Nightscout live: the active schedule is a snapshot tak
 profile id + schedule snapshot and time taken at the tap; editor draft), not by the list's own `@State`
 (`fix/basal-editor-dismiss-2`: a second-level push held in the pushed list's `@State` closed 2–3 s after opening, on
 the devicestatus-driven redraw). The editor writes nothing until "Išsaugoti"; swipe-to-dismiss is off. The
-"dabar (HH:MM)" column and on-screen warning use the snapshot. "Aktyvuoti" reads the
+"dabar (HH:MM)" column and on-screen warning use the snapshot.
+Active marker (`fix/basal-active-marker`, `BasalActiveMarker`): `Storage.activeBasalProfileID` is set on a successful
+activation send and by "Išsaugoti dabartinį kaip…", never by "Kopijuoti". ✓ only on that profile and only while its
+hash equals Nightscout's; other profiles with the same hash show a grey "sutampa su aktyviu" and can be deleted; only
+the active id cannot. When no saved profile matches Nightscout an orange note with "Išsaugoti dabartinį kaip…" is
+shown. Without a stored (existing) id — e.g. right after the update — the oldest profile matching Nightscout is taken.
+The activation screen shows the hashes (Nightscout, this profile, expected on send) for diagnostics. "Aktyvuoti" reads the
 active schedule once more: the confirmation text (warns if it changed since HH:MM), the expected hash and the
 "Ankstesnis" backup come from that read.
 Manual check (no UI tests): open the editor and, separately, an activation screen, leave each open ≥ 6 min while
@@ -89,7 +95,8 @@ Nightscout updates arrive — both stay open, entered values stay.
 split-independence incl. [02:00 0.55, 03:00 0.55] == [02:00 0.55] and 30-minute segments), merge,
 Nightscout → 24 h, the Trio validation examples (0.29, 1.15, 2.05, 2.30 refused; 0.57 and everyday rates pass),
 totals, JSON, whole APNS body < 4 KB with 24 segments and a 30-character name, storage round trip; ids kept by the
-Storage encoding and by `BasalProfileList.upsert` (other profiles unchanged).
+Storage encoding and by `BasalProfileList.upsert` (other profiles unchanged); active marker (copy gets no ✓, copy
+deletable, active id switches after activation, hash mismatch removes ✓, initial choice = oldest match).
 
 ## 3. Fork CI
 

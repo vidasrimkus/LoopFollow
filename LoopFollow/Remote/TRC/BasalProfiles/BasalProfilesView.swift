@@ -120,6 +120,7 @@ struct BasalProfilesView: View {
     @ObservedObject private var profiles = Storage.shared.basalProfiles
     @ObservedObject private var device = Storage.shared.device
     @ObservedObject private var ui = BasalProfilesUIState.shared
+    @ObservedObject private var activeID = Storage.shared.activeBasalProfileID
 
     @State private var showSaveCurrent = false
     @State private var newName = ""
@@ -156,12 +157,23 @@ struct BasalProfilesView: View {
                 .disabled(active.hourly == nil)
             }
 
+            if BasalActiveMarker.noSavedMatch(profiles.value, nsHash: active.hash) {
+                Section {
+                    Text("Aktyvus grafikas pompoje neatitinka nė vieno išsaugoto profilio.").foregroundColor(.orange)
+                    Button("Išsaugoti dabartinį kaip…") {
+                        newName = ""
+                        showSaveCurrent = true
+                    }
+                    .disabled(active.hourly == nil)
+                }
+            }
+
             Section(header: Text("Profiliai")) {
                 if profiles.value.isEmpty {
                     Text("Išsaugotų profilių nėra.").foregroundColor(.secondary)
                 }
                 ForEach(profiles.value) { profile in
-                    let isActive = active.hash == BasalProfileMath.hash(ofHourly: profile.hourlyRates)
+                    let state = BasalActiveMarker.rowState(profile, activeID: activeID.value, nsHash: active.hash)
                     Button {
                         ui.activation = BasalActivationRequest(id: profile.id, snapshot: ActiveBasalSnapshot.current(), capturedAt: Date())
                     } label: {
@@ -170,9 +182,12 @@ struct BasalProfilesView: View {
                                 Text(profile.name).font(.headline)
                                 Text("\(BasalProfileFormat.rate(BasalProfileMath.dailyTotal(profile.hourlyRates))) U/d")
                                     .font(.subheadline).foregroundColor(.secondary)
+                                if state == .matchesActive {
+                                    Text("sutampa su aktyviu").font(.caption).foregroundColor(.secondary)
+                                }
                             }
                             Spacer()
-                            if isActive { Image(systemName: "checkmark").foregroundColor(.green) }
+                            if state == .active { Image(systemName: "checkmark").foregroundColor(.green) }
                         }
                         .contentShape(Rectangle())
                     }
@@ -180,7 +195,7 @@ struct BasalProfilesView: View {
                     .swipeActions {
                         Button("Redaguoti") { ui.editing = BasalProfileDraft(profile) }.tint(.blue)
                         Button("Kopijuoti") { copy(profile) }.tint(.gray)
-                        if !isActive {
+                        if BasalActiveMarker.canDelete(profile, activeID: activeID.value) {
                             Button("Trinti", role: .destructive) { delete(profile) }
                         }
                     }
@@ -202,6 +217,8 @@ struct BasalProfilesView: View {
         .onAppear {
             TaskScheduler.shared.rescheduleTask(id: .profile, to: Date())
             active = ActiveBasalSnapshot.current()
+            let initial = BasalActiveMarker.initialActiveID(profiles.value, storedID: activeID.value, nsHash: active.hash)
+            if initial != activeID.value { activeID.value = initial }
         }
         .sheet(item: $ui.editing) { _ in
             BasalProfileEditorView(ui: ui) { saved in upsert(saved) }
@@ -252,7 +269,7 @@ struct BasalProfilesView: View {
     }
 
     private func delete(_ profile: BasalProfile) {
-        guard active.hash != BasalProfileMath.hash(ofHourly: profile.hourlyRates) else { return } // never the active one
+        guard BasalActiveMarker.canDelete(profile, activeID: activeID.value) else { return } // never the active one
         profiles.value.removeAll { $0.id == profile.id }
     }
 
@@ -262,7 +279,9 @@ struct BasalProfilesView: View {
             if case .name = $0 { return true } else { return false }
         }
         guard problems.isEmpty else { message = problems.map(\.text).joined(separator: "\n"); return }
-        profiles.value.append(BasalProfile(name: name.trimmingCharacters(in: .whitespaces), hourlyRates: hourly))
+        let saved = BasalProfile(name: name.trimmingCharacters(in: .whitespaces), hourlyRates: hourly)
+        profiles.value.append(saved)
+        activeID.value = saved.id // saved from the active schedule, so it is the active profile
     }
 
     private func importProfiles(_ result: Result<URL, Error>) {
@@ -419,6 +438,25 @@ struct BasalProfileActivationView: View {
                 if let result { Text(result).foregroundColor(.secondary) }
             }
             if isSending { ProgressView("Siunčiama…") }
+            Section(header: Text("Diagnostika (hash)")) {
+                HStack {
+                    Text("Nightscout (\(BasalProfileFormat.clock(capturedAt)))")
+                    Spacer()
+                    Text(active.hash ?? "—").font(.caption.monospaced()).foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Šis profilis")
+                    Spacer()
+                    Text(BasalProfileMath.hash(ofHourly: profile.hourlyRates)).font(.caption.monospaced()).foregroundColor(.secondary)
+                }
+                if let frozenHash {
+                    HStack {
+                        Text("Siunčiamas laukiamas")
+                        Spacer()
+                        Text(frozenHash).font(.caption.monospaced()).foregroundColor(.secondary)
+                    }
+                }
+            }
         }
         .navigationTitle(profile.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -486,6 +524,10 @@ struct BasalProfileActivationView: View {
         pushNotificationManager.sendBasalSchedulePushNotification(profile: profile, expectedActiveHash: hash) { success, error in
             DispatchQueue.main.async {
                 isSending = false
+                // Marked active once the command is sent (LoopFollow does not read Trio's reply). If Trio refuses it,
+                // the hash no longer matches Nightscout and the ✓ goes away on its own.
+                let activeID = Storage.shared.activeBasalProfileID
+                activeID.value = BasalActiveMarker.afterActivation(sent: profile.id, success: success, current: activeID.value)
                 result = success
                     ? RemoteCommandMessage.sent + " Jei Trio praneš pompos klaidą, spauskite „Kartoti“ — tas pats siuntimas saugus."
                     : "Klaida: \(error ?? "nežinoma")"

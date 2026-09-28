@@ -39,6 +39,49 @@ enum BasalProfileList {
     }
 }
 
+/// Which saved profile is "the active one". Identity comes from the stored active id, not from the hash alone: a copy
+/// has the same hash as its original but is not the active profile.
+enum BasalActiveMarker {
+    enum RowState: Equatable {
+        /// ✓ — the stored active profile, and its schedule equals Nightscout's.
+        case active
+        /// Same schedule as Nightscout's, but not the stored active profile (e.g. a copy): grey note, no ✓.
+        case matchesActive
+        case none
+    }
+
+    static func rowState(_ profile: BasalProfile, activeID: UUID?, nsHash: String?) -> RowState {
+        guard let nsHash, BasalProfileMath.hash(ofHourly: profile.hourlyRates) == nsHash else { return .none }
+        return profile.id == activeID ? .active : .matchesActive
+    }
+
+    /// Only the stored active profile is protected from deletion.
+    static func canDelete(_ profile: BasalProfile, activeID: UUID?) -> Bool {
+        profile.id != activeID
+    }
+
+    /// True when no saved profile has Nightscout's schedule: the pump runs a schedule that is not saved here.
+    static func noSavedMatch(_ profiles: [BasalProfile], nsHash: String?) -> Bool {
+        guard let nsHash else { return false }
+        return !profiles.contains { BasalProfileMath.hash(ofHourly: $0.hourlyRates) == nsHash }
+    }
+
+    /// Active id after an activation send: the sent profile on success, unchanged otherwise.
+    static func afterActivation(sent profileID: UUID, success: Bool, current: UUID?) -> UUID? {
+        success ? profileID : current
+    }
+
+    /// One-time choice when no (existing) active id is stored, e.g. right after the update: the oldest saved profile
+    /// with Nightscout's schedule — the original rather than its later copies. nil when none matches.
+    static func initialActiveID(_ profiles: [BasalProfile], storedID: UUID?, nsHash: String?) -> UUID? {
+        if let storedID, profiles.contains(where: { $0.id == storedID }) { return storedID }
+        guard let nsHash else { return storedID }
+        return profiles
+            .filter { BasalProfileMath.hash(ofHourly: $0.hourlyRates) == nsHash }
+            .min { $0.createdAt < $1.createdAt }?.id ?? storedID
+    }
+}
+
 /// One segment of the `basal_schedule` array Trio accepts (Trio `RemoteBasalSchedule.Segment`).
 struct BasalScheduleSegment: Codable, Equatable {
     let start: String // "HH:00"

@@ -110,6 +110,8 @@ class Storage {
     var lastProfileName = StorageValue<String>(key: "lastProfileName", defaultValue: "")
     /// Named basal schedules for Trio Remote Control (set_basal_schedule). Kept only on this phone.
     var basalProfiles = StorageValue<[BasalProfile]>(key: "basalProfiles", defaultValue: [])
+    /// The saved profile last activated (or saved from the active schedule); only it gets ✓ and cannot be deleted.
+    var activeBasalProfileID = StorageValue<UUID?>(key: "activeBasalProfileID", defaultValue: nil)
     var iageInsertTime = StorageValue<TimeInterval>(key: "iageInsertTime", defaultValue: 0)
     var lastMinBgMgdl = StorageValue<Double?>(key: "lastMinBgMgdl", defaultValue: nil)
     var lastMaxBgMgdl = StorageValue<Double?>(key: "lastMaxBgMgdl", defaultValue: nil)

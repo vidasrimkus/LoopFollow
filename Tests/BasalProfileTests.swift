@@ -227,4 +227,66 @@ struct BasalProfileTests {
         #expect(Array(afterAdd.prefix(2)) == afterEdit)
         #expect(BasalProfileList.profile(id: b.id, in: afterAdd)?.name == "Second")
     }
+
+    // MARK: Active marker
+
+    private func original() -> BasalProfile {
+        BasalProfile(name: "First", hourlyRates: hourly([(0, "0.4"), (6, "0.6")]), createdAt: Date(timeIntervalSince1970: 1000))
+    }
+
+    private func copy(of p: BasalProfile) -> BasalProfile {
+        BasalProfile(name: "First (kopija)", hourlyRates: p.hourlyRates, createdAt: Date(timeIntervalSince1970: 2000))
+    }
+
+    @Test("A copy does not get ✓: only the stored active profile does; the copy shows 'sutampa su aktyviu'")
+    func copyGetsNoCheckmark() {
+        let a = original()
+        let c = copy(of: a)
+        let ns = BasalProfileMath.hash(ofHourly: a.hourlyRates)
+        #expect(BasalActiveMarker.rowState(a, activeID: a.id, nsHash: ns) == .active)
+        #expect(BasalActiveMarker.rowState(c, activeID: a.id, nsHash: ns) == .matchesActive)
+        #expect(!BasalActiveMarker.noSavedMatch([a, c], nsHash: ns))
+    }
+
+    @Test("The copy can be deleted; the stored active profile cannot")
+    func copyCanBeDeleted() {
+        let a = original()
+        let c = copy(of: a)
+        #expect(BasalActiveMarker.canDelete(c, activeID: a.id))
+        #expect(!BasalActiveMarker.canDelete(a, activeID: a.id))
+    }
+
+    @Test("Active id switches to the activated profile on a successful send, stays on a failed one")
+    func activeIDSwitchesAfterActivation() {
+        let a = original()
+        let c = copy(of: a)
+        let ns = BasalProfileMath.hash(ofHourly: a.hourlyRates)
+        let after = BasalActiveMarker.afterActivation(sent: c.id, success: true, current: a.id)
+        #expect(after == c.id)
+        #expect(BasalActiveMarker.rowState(c, activeID: after, nsHash: ns) == .active)
+        #expect(BasalActiveMarker.rowState(a, activeID: after, nsHash: ns) == .matchesActive)
+        #expect(BasalActiveMarker.canDelete(a, activeID: after))
+        #expect(BasalActiveMarker.afterActivation(sent: c.id, success: false, current: a.id) == a.id)
+    }
+
+    @Test("Nightscout schedule not equal to the active profile removes ✓; note when no saved profile matches")
+    func hashMismatchRemovesCheckmark() {
+        let a = original()
+        let other = BasalProfileMath.hash(ofHourly: hourly([(0, "0.5")]))
+        #expect(BasalActiveMarker.rowState(a, activeID: a.id, nsHash: other) == .none)
+        #expect(BasalActiveMarker.noSavedMatch([a], nsHash: other))
+        #expect(BasalActiveMarker.rowState(a, activeID: a.id, nsHash: nil) == .none)
+        #expect(!BasalActiveMarker.noSavedMatch([a], nsHash: nil))
+    }
+
+    @Test("Without a stored active id the oldest profile with Nightscout's schedule is chosen; a stored id is kept")
+    func initialActiveID() {
+        let a = original()
+        let c = copy(of: a)
+        let ns = BasalProfileMath.hash(ofHourly: a.hourlyRates)
+        #expect(BasalActiveMarker.initialActiveID([c, a], storedID: nil, nsHash: ns) == a.id)
+        #expect(BasalActiveMarker.initialActiveID([c, a], storedID: c.id, nsHash: ns) == c.id)
+        #expect(BasalActiveMarker.initialActiveID([c, a], storedID: UUID(), nsHash: ns) == a.id) // deleted id replaced
+        #expect(BasalActiveMarker.initialActiveID([a], storedID: nil, nsHash: "0000000000000000") == nil)
+    }
 }
