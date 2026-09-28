@@ -328,6 +328,8 @@ struct BasalProfileActivationView: View {
     @State private var showConfirm = false
     @State private var confirmText = ""
     @State private var frozenHash: String?
+    /// The active schedule re-read at the "Aktyvuoti" tap; the expected hash and "Ankstesnis" come from it.
+    @State private var confirmSnapshot: ActiveBasalSnapshot?
     @State private var isSending = false
     @State private var result: String?
     @State private var lastSent: (profile: BasalProfile, hash: String)?
@@ -370,7 +372,7 @@ struct BasalProfileActivationView: View {
                 }
             }
             Section {
-                Button("Aktyvuoti") { prepareConfirmation(old: oldTotal, new: newTotal) }
+                Button("Aktyvuoti") { prepareConfirmation(new: newTotal) }
                     .disabled(isSending || !problems.isEmpty || active.hash == nil)
                 if lastSent != nil {
                     Button("Kartoti (siųsti tą patį)") { if let last = lastSent { send(last.profile, hash: last.hash) } }
@@ -402,20 +404,27 @@ struct BasalProfileActivationView: View {
         d == 0 ? "0" : (d > 0 ? "+" : "") + BasalProfileFormat.rate(d)
     }
 
-    /// Text and expected hash are fixed here, when the dialog opens, and not recomputed while it is shown.
-    private func prepareConfirmation(old: Decimal?, new: Decimal) {
+    /// The active schedule is read once more here, at the tap (the screen may have been open for minutes). Text,
+    /// expected hash and the schedule saved as "Ankstesnis" are fixed from that read and not recomputed while shown.
+    private func prepareConfirmation(new: Decimal) {
+        let current = ActiveBasalSnapshot.current()
+        let old = current.total
         var text = "\(profile.name)\n\(summary(old: old, new: new))\nTrio įrašys grafiką į pompą (tik Dana)."
+        if current.hash != active.hash {
+            text += "\n\n⚠️ Aktyvus grafikas pasikeitė nuo \(BasalProfileFormat.clock(capturedAt)) — lentelė ekrane pasenusi."
+        }
         if let old, let pct = BasalProfileMath.percentChange(from: old, to: new), abs(pct) > 20 {
             text += "\n\n⚠️ Paros suma keičiasi daugiau nei 20 % (\(pct > 0 ? "+" : "")\(pct) %)."
         }
-        if active.isStale() {
-            text += "\n\n⚠️ Nightscout duomenys (\(BasalProfileFormat.clock(capturedAt))) \(active.ageText()): Trio gali atmesti komandą, jei aktyvus grafikas pasikeitė."
+        if current.isStale() {
+            text += "\n\n⚠️ Nightscout duomenys \(current.ageText()): Trio gali atmesti komandą, jei aktyvus grafikas pasikeitė."
         }
-        if active.hourly == nil {
+        if current.hourly == nil {
             text += "\n\nDabartinio grafiko negalima automatiškai išsaugoti kaip „Ankstesnis“ (ne sveikos valandos)."
         }
         confirmText = text
-        frozenHash = active.hash
+        frozenHash = current.hash
+        confirmSnapshot = current
         showConfirm = true
     }
 
@@ -427,8 +436,8 @@ struct BasalProfileActivationView: View {
     /// Before every activation the schedule being replaced is kept as "Ankstesnis (YYYY-MM-DD HH:MM)", unless a
     /// saved profile with the same 24 rates already exists.
     private func saveCurrentAsPrevious() {
-        guard let hourly = active.hourly,
-              !profiles.value.contains(where: { BasalProfileMath.hash(ofHourly: $0.hourlyRates) == active.hash })
+        guard let replaced = confirmSnapshot, let hourly = replaced.hourly,
+              !profiles.value.contains(where: { BasalProfileMath.hash(ofHourly: $0.hourlyRates) == replaced.hash })
         else { return }
         profiles.value.append(BasalProfile(name: "Ankstesnis (\(BasalProfileFormat.stamp(Date())))", hourlyRates: hourly))
     }

@@ -76,7 +76,9 @@ it. The existing QR settings export is not extended (several profiles would exce
 exported/imported as a JSON file from the Basal Profiles screen.
 The list does not observe Nightscout live: the active schedule is a snapshot taken on appear and on
 "Atnaujinti"; a row opens activation through `@State` (not a `NavigationLink` inside the Form) with the schedule
-snapshot and time taken at the tap — the "dabar (HH:MM)" column, warnings and expected hash all use it.
+snapshot and time taken at the tap — the "dabar (HH:MM)" column and on-screen warning use it. "Aktyvuoti" reads the
+active schedule once more: the confirmation text (warns if it changed since HH:MM), the expected hash and the
+"Ankstesnis" backup come from that read.
 Manual check (no UI tests): open the editor and, separately, an activation screen, leave each open ≥ 6 min while
 Nightscout updates arrive — both stay open, entered values stay.
 
