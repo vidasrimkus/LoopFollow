@@ -10,6 +10,15 @@ struct TrioRemoteControlView: View {
     @ObservedObject private var dosingMode = Observable.shared.dosingMode
     @Environment(\.presentationMode) var presentationMode
 
+    /// Which command screen is open. Kept in @State and bound to links placed outside the lazy grid: this view is
+    /// redrawn on every devicestatus (dosingMode / override / temp target), and links living inside a LazyVGrid
+    /// lost their pushed screen on such a redraw — closing an open editor or confirmation with it.
+    @State private var selection: TRCScreen?
+
+    enum TRCScreen: Hashable, CaseIterable {
+        case meal, bolus, tempTarget, overrides, dosingMode, basalProfiles
+    }
+
     var body: some View {
         NavigationView {
             VStack {
@@ -19,18 +28,51 @@ struct TrioRemoteControlView: View {
                 ]
 
                 LazyVGrid(columns: columns, spacing: 16) {
-                    CommandButtonView(command: "Meal", iconName: "fork.knife", destination: MealView())
-                    CommandButtonView(command: "Bolus", iconName: "syringe", destination: BolusView())
-                    CommandButtonView(command: "Temp Target", iconName: "scope", destination: TempTargetView(), isActive: activeTempTarget.value != nil)
-                    CommandButtonView(command: "Overrides", iconName: "slider.horizontal.3", destination: OverrideView(), isActive: activeOverrideNote.value != nil)
-                    CommandButtonView(command: "Dosing Mode", iconName: "dial.medium", destination: DosingModeView(), isActive: isNonClosedMode)
-                    CommandButtonView(command: "Basal Profiles", iconName: "chart.bar.xaxis", destination: BasalProfilesView())
+                    tile("Meal", "fork.knife", .meal)
+                    tile("Bolus", "syringe", .bolus)
+                    tile("Temp Target", "scope", .tempTarget, isActive: activeTempTarget.value != nil)
+                    tile("Overrides", "slider.horizontal.3", .overrides, isActive: activeOverrideNote.value != nil)
+                    tile("Dosing Mode", "dial.medium", .dosingMode, isActive: isNonClosedMode)
+                    tile("Basal Profiles", "chart.bar.xaxis", .basalProfiles)
                 }
                 .padding(.horizontal)
 
                 Spacer()
             }
+            .background(links)
             .navigationBarTitle("Trio Remote Control", displayMode: .inline)
+        }
+    }
+
+    private func tile(_ command: String, _ icon: String, _ screen: TRCScreen, isActive: Bool = false) -> some View {
+        Button { selection = screen } label: {
+            CommandTile(command: command, iconName: icon, isActive: isActive)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    /// Hidden, non-lazy links driven by `selection`.
+    private var links: some View {
+        VStack {
+            ForEach(TRCScreen.allCases, id: \.self) { screen in
+                NavigationLink(
+                    destination: destination(screen),
+                    isActive: Binding(get: { selection == screen }, set: { if !$0, selection == screen { selection = nil } })
+                ) { EmptyView() }
+            }
+        }
+        .hidden()
+    }
+
+    @ViewBuilder
+    private func destination(_ screen: TRCScreen) -> some View {
+        switch screen {
+        case .meal: MealView()
+        case .bolus: BolusView()
+        case .tempTarget: TempTargetView()
+        case .overrides: OverrideView()
+        case .dosingMode: DosingModeView()
+        case .basalProfiles: BasalProfilesView()
         }
     }
 
@@ -51,26 +93,37 @@ struct CommandButtonView<Destination: View>: View {
 
     var body: some View {
         NavigationLink(destination: destination) {
-            VStack {
-                Image(systemName: iconName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 50, height: 50)
-                Text(command)
-            }
-            .frame(maxWidth: .infinity, minHeight: 100)
-            .padding()
-            .background(Color.blue)
-            .foregroundColor(.white)
-            .cornerRadius(8)
-            .overlay {
-                if isActive {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.green, lineWidth: 2.5)
-                }
-            }
-            .shadow(color: isActive ? Color.green.opacity(0.7) : .clear, radius: isActive ? 9 : 0)
+            CommandTile(command: command, iconName: iconName, isActive: isActive)
         }
         .buttonStyle(PlainButtonStyle())
+    }
+}
+
+/// The look of a command button, shared by the navigation-link buttons and the selection-driven TRC buttons.
+struct CommandTile: View {
+    let command: String
+    let iconName: String
+    var isActive: Bool = false
+
+    var body: some View {
+        VStack {
+            Image(systemName: iconName)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 50, height: 50)
+            Text(command)
+        }
+        .frame(maxWidth: .infinity, minHeight: 100)
+        .padding()
+        .background(Color.blue)
+        .foregroundColor(.white)
+        .cornerRadius(8)
+        .overlay {
+            if isActive {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.green, lineWidth: 2.5)
+            }
+        }
+        .shadow(color: isActive ? Color.green.opacity(0.7) : .clear, radius: isActive ? 9 : 0)
     }
 }

@@ -46,6 +46,12 @@ enum BasalProfileFormat {
         f.dateFormat = "yyyy-MM-dd HH:mm"
         return f.string(from: date)
     }
+
+    static func clock(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f.string(from: date)
+    }
 }
 
 /// Export/import file: the saved profiles as JSON.
@@ -80,17 +86,22 @@ struct BasalProfilesDocument: FileDocument {
 
 struct BasalProfilesView: View {
     @ObservedObject private var profiles = Storage.shared.basalProfiles
-    @ObservedObject private var loadedAt = Observable.shared.nsProfileLoadedAt
     @ObservedObject private var device = Storage.shared.device
 
     @State private var editing: BasalProfile?
+    /// The open activation screen: profile plus the schedule snapshot taken at the tap. Drives a link outside the lazy
+    /// Form rows; kept after closing so the pop animation still has its content.
+    @State private var activating: (profile: BasalProfile, snapshot: ActiveBasalSnapshot, at: Date)?
+    @State private var showActivation = false
     @State private var showSaveCurrent = false
     @State private var newName = ""
     @State private var showExporter = false
     @State private var showImporter = false
     @State private var message: String?
 
-    private var active: ActiveBasalSnapshot { ActiveBasalSnapshot.current() }
+    /// Nightscout's active schedule, taken when the screen appears or on "Atnaujinti" — not observed live, so a
+    /// Nightscout or devicestatus update never redraws this screen under an open editor or activation.
+    @State private var active = ActiveBasalSnapshot.current()
 
     var body: some View {
         Form {
@@ -106,6 +117,10 @@ struct BasalProfilesView: View {
                     Text("Nightscout profilio dar nėra.").foregroundColor(.secondary)
                 }
                 HStack { Text("Duomenys"); Spacer(); Text(active.ageText()).foregroundColor(active.isStale() ? .orange : .secondary) }
+                Button("Atnaujinti") {
+                    TaskScheduler.shared.rescheduleTask(id: .profile, to: Date())
+                    active = ActiveBasalSnapshot.current()
+                }
                 Button("Išsaugoti dabartinį kaip…") {
                     newName = ""
                     showSaveCurrent = true
@@ -119,7 +134,10 @@ struct BasalProfilesView: View {
                 }
                 ForEach(profiles.value) { profile in
                     let isActive = active.hash == BasalProfileMath.hash(ofHourly: profile.hourlyRates)
-                    NavigationLink(destination: BasalProfileActivationView(profile: profile)) {
+                    Button {
+                        activating = (profile, ActiveBasalSnapshot.current(), Date())
+                        showActivation = true
+                    } label: {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(profile.name).font(.headline)
@@ -128,8 +146,11 @@ struct BasalProfilesView: View {
                             }
                             Spacer()
                             if isActive { Image(systemName: "checkmark").foregroundColor(.green) }
+                            Image(systemName: "chevron.right").foregroundColor(.secondary)
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .swipeActions {
                         Button("Redaguoti") { editing = profile }.tint(.blue)
                         Button("Kopijuoti") { copy(profile) }.tint(.gray)
@@ -148,9 +169,19 @@ struct BasalProfilesView: View {
                 Button("Importuoti (JSON)") { showImporter = true }
             }
         }
+        .background(
+            NavigationLink(
+                destination: activating.map { BasalProfileActivationView(profile: $0.profile, active: $0.snapshot, capturedAt: $0.at) },
+                isActive: $showActivation
+            ) { EmptyView() }
+                .hidden()
+        )
         .navigationTitle("Basal Profiles")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { TaskScheduler.shared.rescheduleTask(id: .profile, to: Date()) }
+        .onAppear {
+            TaskScheduler.shared.rescheduleTask(id: .profile, to: Date())
+            active = ActiveBasalSnapshot.current()
+        }
         .sheet(item: $editing) { profile in
             BasalProfileEditorView(profile: profile) { saved in upsert(saved) }
         }
@@ -301,7 +332,10 @@ struct BasalProfileActivationView: View {
     @State private var result: String?
     @State private var lastSent: (profile: BasalProfile, hash: String)?
 
-    private var active: ActiveBasalSnapshot { ActiveBasalSnapshot.current() }
+    /// "Dabar" = the schedule as it was when this screen was opened, with that moment. Taken once by the list and
+    /// passed in, so no redraw recomputes it; comparison, warnings and the expected hash all use this one snapshot.
+    let active: ActiveBasalSnapshot
+    let capturedAt: Date
 
     var body: some View {
         Form {
@@ -310,11 +344,12 @@ struct BasalProfileActivationView: View {
             let newTotal = BasalProfileMath.dailyTotal(profile.hourlyRates)
             Section(header: Text("Paros suma")) {
                 Text(summary(old: oldTotal, new: newTotal))
-                if active.isStale() {
-                    Text("⚠️ Nightscout profilio duomenys \(active.ageText()) — aktyvus grafikas gali būti kitas.").foregroundColor(.orange)
+                if active.isStale(now: capturedAt.timeIntervalSince1970) {
+                    Text("⚠️ Nightscout profilio duomenys \(active.ageText(now: capturedAt.timeIntervalSince1970)) — aktyvus grafikas gali būti kitas.")
+                        .foregroundColor(.orange)
                 }
             }
-            Section(header: Text("Valanda | dabar | naujas | Δ")) {
+            Section(header: Text("Valanda | dabar (\(BasalProfileFormat.clock(capturedAt))) | naujas | Δ")) {
                 ForEach(0 ..< BasalProfileMath.hours, id: \.self) { hour in
                     let now = current?[hour]
                     let new = profile.hourlyRates[hour]
@@ -347,7 +382,6 @@ struct BasalProfileActivationView: View {
         }
         .navigationTitle(profile.name)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { TaskScheduler.shared.rescheduleTask(id: .profile, to: Date()) }
         .alert("Aktyvuoti bazalo profilį", isPresented: $showConfirm) {
             Button("Aktyvuoti", role: .destructive) {
                 if let hash = frozenHash { activate(hash: hash) }
@@ -375,7 +409,7 @@ struct BasalProfileActivationView: View {
             text += "\n\n⚠️ Paros suma keičiasi daugiau nei 20 % (\(pct > 0 ? "+" : "")\(pct) %)."
         }
         if active.isStale() {
-            text += "\n\n⚠️ Nightscout duomenys \(active.ageText()): Trio gali atmesti komandą, jei aktyvus grafikas pasikeitė."
+            text += "\n\n⚠️ Nightscout duomenys (\(BasalProfileFormat.clock(capturedAt))) \(active.ageText()): Trio gali atmesti komandą, jei aktyvus grafikas pasikeitė."
         }
         if active.hourly == nil {
             text += "\n\nDabartinio grafiko negalima automatiškai išsaugoti kaip „Ankstesnis“ (ne sveikos valandos)."

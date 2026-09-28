@@ -65,7 +65,8 @@ vidasrimkus/Trio CUSTOMIZATIONS.md §7, Dana only).
 | `LoopFollow/Remote/TRC/BasalProfiles/BasalProfile.swift` | New. `BasalProfile` (id, name, 24 hourly rates, created/updated); `BasalProfileMath`: merge into segments, Nightscout → 24 hours (refuses off-hour schedules), hash identical to Trio's (48 half-hour values, independent of how the schedule is split — Trio CUSTOMIZATIONS.md §7), daily total, % change, the same validation as Trio (name, > 0, whole hundredths, Dana `Decimal → Double(truncating:) → UInt16(*100)` check with the nearest exact rates). |
 | `LoopFollow/Remote/TRC/BasalProfiles/BasalProfilesView.swift` | New. List (U/d, ✓ when the profile's hash equals the hash of Nightscout's active schedule), Edit / Copy / Delete (not the active one), "Išsaugoti dabartinį kaip…", JSON export/import (file exporter/importer); editor (24 rows, 0.01 U/h); activation (hour \| now \| new \| Δ table, total A → B (±N %), confirmation text and expected hash fixed when the dialog opens, extra warning above 20 %, stale-data warning (> 15 min or none), "Ankstesnis (YYYY-MM-DD HH:MM)" saved before every new activation (the confirmed "Aktyvuoti") unless a saved profile already has the active schedule's hash — not on "Kartoti", which re-sends the identical, already-confirmed command: the schedule it replaces was saved by the activation it repeats, and if Trio's active schedule changed meanwhile Trio refuses it on the expected hash). |
 | `LoopFollow/Remote/TRC/TRCCommandType.swift`, `PushMessage.swift`, `PushNotificationManager.swift` | `setBasalSchedule`; `basal_schedule`, `basal_schedule_name`, `expected_active_hash` (nil not encoded); send through the existing `sendEncryptedCommand`. |
-| `LoopFollow/Remote/TRC/TrioRemoteControlView.swift` | "Basal Profiles" button (Trio Remote Control only). |
+| `LoopFollow/Remote/TRC/TrioRemoteControlView.swift` | "Basal Profiles" button (Trio Remote Control only). All six TRC buttons open their screen through `@State selection` and hidden links outside the `LazyVGrid` (`fix/basal-editor-dismiss`): links inside the lazy grid lost their pushed screen when a devicestatus redrew the grid (dosingMode / device publish on every record), closing an open editor or confirmation. `CommandButtonView` is kept for Loop APNS; its look is `CommandTile`. |
+| `LoopFollow/Remote/TRC/DosingModeView.swift` | (`fix/basal-editor-dismiss`) confirmation text fixed at the tap, not recomputed by the 30 s timeline or devicestatus. |
 | `LoopFollow/Storage/Storage.swift`, `Observable.swift`, `Controllers/Nightscout/Profile.swift` | `basalProfiles` storage; `nsProfileLoadedAt` set when the Nightscout profile loads. |
 
 **Notes.** Max Basal is not shown: Trio does not publish it in the Nightscout profile — Trio enforces it.
@@ -73,6 +74,11 @@ LoopFollow does not parse Trio's reply, so "Kartoti" is always offered after a s
 schedule with the same expected hash is safe on the Trio side). Omnipod DASH is not blocked here; Trio refuses
 it. The existing QR settings export is not extended (several profiles would exceed a QR code); profiles are
 exported/imported as a JSON file from the Basal Profiles screen.
+The list does not observe Nightscout live: the active schedule is a snapshot taken on appear and on
+"Atnaujinti"; a row opens activation through `@State` (not a `NavigationLink` inside the Form) with the schedule
+snapshot and time taken at the tap — the "dabar (HH:MM)" column, warnings and expected hash all use it.
+Manual check (no UI tests): open the editor and, separately, an activation screen, leave each open ≥ 6 min while
+Nightscout updates arrive — both stay open, entered values stay.
 
 **Tests.** `Tests/BasalProfileTests.swift`: Trio hash vectors V1–V5 (Nightscout form, sent segments, hourly;
 split-independence incl. [02:00 0.55, 03:00 0.55] == [02:00 0.55] and 30-minute segments), merge,

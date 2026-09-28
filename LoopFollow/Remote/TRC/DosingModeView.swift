@@ -15,6 +15,8 @@ struct DosingModeView: View {
     @State private var isLoading: Bool = false
     @State private var statusMessage: String? = nil
     @State private var selectedMode: TrioDosingMode? = nil
+    /// Confirmation text taken at the tap; the 30 s timeline and devicestatus updates do not rewrite an open dialog.
+    @State private var confirmText: String = ""
 
     enum AlertType {
         case confirmChange
@@ -75,6 +77,7 @@ struct DosingModeView: View {
                             ForEach(TrioDosingMode.allCases) { mode in
                                 Button(action: {
                                     selectedMode = mode
+                                    confirmText = confirmationText(for: mode)
                                     alertType = .confirmChange
                                     showAlert = true
                                 }) {
@@ -110,7 +113,7 @@ struct DosingModeView: View {
                 case .confirmChange:
                     return Alert(
                         title: Text("Dosing Mode"),
-                        message: Text(confirmationText),
+                        message: Text(confirmText),
                         primaryButton: .default(Text("Confirm"), action: {
                             if let mode = selectedMode {
                                 sendDosingMode(mode)
@@ -154,8 +157,7 @@ struct DosingModeView: View {
 
     /// Asked before every send. Switching to Closed Loop gets an extra warning because Trio then doses
     /// on its own again.
-    private var confirmationText: String {
-        guard let mode = selectedMode else { return "" }
+    private func confirmationText(for mode: TrioDosingMode) -> String {
         var text = "Perjungti \(currentModeName) → \(mode.displayName)?"
         if let note = TrioDosingMode.confirmationNote(dosingMode.value, now: now) {
             text += "\n\n" + note
