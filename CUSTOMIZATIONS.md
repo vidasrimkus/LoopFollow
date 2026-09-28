@@ -83,9 +83,14 @@ the devicestatus-driven redraw). The editor writes nothing until "Išsaugoti"; s
 Active marker (`fix/basal-active-marker`, `BasalActiveMarker`): `Storage.activeBasalProfileID` is set on a successful
 activation send and by "Išsaugoti dabartinį kaip…", never by "Kopijuoti". ✓ only on that profile and only while its
 hash equals Nightscout's; other profiles with the same hash show a grey "sutampa su aktyviu" and can be deleted; only
-the active id cannot. When no saved profile matches Nightscout an orange note with "Išsaugoti dabartinį kaip…" is
-shown. Without a stored (existing) id — e.g. right after the update — the oldest profile matching Nightscout is taken.
+the active id cannot. When no saved profile matches Nightscout, "Dabar Trio'je" says so (orange). Without a stored (existing) id — e.g. right after the update — the oldest profile matching Nightscout is taken.
 The activation screen shows the hashes (Nightscout, this profile, expected on send) for diagnostics.
+"Dabar Trio'je" (`feat/current-basal-view`, top of the screen): Trio's active schedule from Nightscout
+store.default.basal as merged segments (time → U/h) and U/d, drawn from `BasalProfileMath.nightscoutSlots` — the same
+48 half-hour values `hash(ofNightscout:)` is computed from, not a separate parse; "Gauta iš NS" time, "Unknown" when
+> 15 min or never loaded; the matching saved profile's name (active one first) or "Neatitinka nė vieno išsaugoto
+profilio"; "Atnaujinti", "Išsaugoti kaip profilį…". Tap opens a read-only sheet (24 hourly rows, 48 when the schedule
+has half-hour changes); nothing is sent from it. The section also refreshes when a Nightscout profile load finishes.
 Row: tap on the name opens the editor; "Aktyvuoti" button and a "…" menu (Kopijuoti, Trinti — disabled for the
 active id) in the row; swipe actions (Redaguoti, Kopijuoti, Trinti) stay. "Aktyvuoti" reads the
 active schedule once more: the confirmation text (warns if it changed since HH:MM), the expected hash and the
@@ -98,7 +103,9 @@ split-independence incl. [02:00 0.55, 03:00 0.55] == [02:00 0.55] and 30-minute 
 Nightscout → 24 h, the Trio validation examples (0.29, 1.15, 2.05, 2.30 refused; 0.57 and everyday rates pass),
 totals, JSON, whole APNS body < 4 KB with 24 segments and a 30-character name, storage round trip; ids kept by the
 Storage encoding and by `BasalProfileList.upsert` (other profiles unchanged); active marker (copy gets no ✓, copy
-deletable, active id switches after activation, hash mismatch removes ✓, initial choice = oldest match).
+deletable, active id switches after activation, hash mismatch removes ✓, initial choice = oldest match); "Dabar
+Trio'je" shows the hash input (hash of displayed slots == Trio vectors V1–V6, rows/segments/total, 48 rows for V4,
+Unknown after 15 min, matching profile).
 
 ## 3. Fork CI
 

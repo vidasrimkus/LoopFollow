@@ -66,6 +66,14 @@ enum BasalActiveMarker {
         return !profiles.contains { BasalProfileMath.hash(ofHourly: $0.hourlyRates) == nsHash }
     }
 
+    /// The saved profile with Nightscout's schedule, for "Dabar Trio'je": the active one if it matches, else the
+    /// oldest match; nil when none matches.
+    static func matchingProfile(_ profiles: [BasalProfile], activeID: UUID?, nsHash: String?) -> BasalProfile? {
+        guard let nsHash else { return nil }
+        let matches = profiles.filter { BasalProfileMath.hash(ofHourly: $0.hourlyRates) == nsHash }
+        return matches.first { $0.id == activeID } ?? matches.min { $0.createdAt < $1.createdAt }
+    }
+
     /// Active id after an activation send: the sent profile on success, unchanged otherwise.
     static func afterActivation(sent profileID: UUID, success: Bool, current: UUID?) -> UUID? {
         success ? profileID : current
@@ -134,8 +142,23 @@ enum BasalProfileMath {
     /// The 48 half-hour values joined with ";"; hash = lowercase hex of the first 8 bytes of SHA-256 over the
     /// UTF-8 bytes. Depends on what the schedule delivers, not on how it is split into entries.
     static func hash(entries: [(minutes: Int, cents: Int)]) -> String {
-        let canonical = halfHourSlots(entries).map(String.init).joined(separator: ";")
+        hash(ofSlots: halfHourSlots(entries))
+    }
+
+    /// Hash of 48 half-hour values (cents) as produced by `halfHourSlots`.
+    static func hash(ofSlots slots: [Int]) -> String {
+        let canonical = slots.map(String.init).joined(separator: ";")
         return SHA256.hash(data: Data(canonical.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Nightscout schedule → the 48 half-hour values the expected hash is computed from. The "Dabar Trio'je" view
+    /// shows exactly these, so what is displayed is what `hash(ofNightscout:)` describes.
+    static func nightscoutSlots(_ entries: [(seconds: Int, rate: Double)]) -> [Int] {
+        halfHourSlots(nightscoutEntries(entries))
+    }
+
+    private static func nightscoutEntries(_ entries: [(seconds: Int, rate: Double)]) -> [(minutes: Int, cents: Int)] {
+        entries.map { (minutes: $0.seconds / 60, cents: cents(fromDouble: $0.rate)) }
     }
 
     /// Hash of a profile's 24 hourly rates.
@@ -151,7 +174,38 @@ enum BasalProfileMath {
     /// Hash of Trio's active schedule as Nightscout shows it (any split, including 30-minute segments).
     /// This is the value for `expected_active_hash`.
     static func hash(ofNightscout entries: [(seconds: Int, rate: Double)]) -> String {
-        hash(entries: entries.map { (minutes: $0.seconds / 60, cents: cents(fromDouble: $0.rate)) })
+        hash(entries: nightscoutEntries(entries))
+    }
+
+    // MARK: Display of half-hour slots ("Dabar Trio'je")
+
+    /// Table rows from the 48 slots: 24 hourly rows when every hour's two halves are equal, else all 48 half-hours.
+    static func slotRows(_ slots: [Int]) -> [(start: String, cents: Int)] {
+        guard slots.count == 48 else { return [] }
+        let hourly = (0 ..< hours).allSatisfy { slots[$0 * 2] == slots[$0 * 2 + 1] }
+        return stride(from: 0, to: 48, by: hourly ? 2 : 1).map { (start: slotStart($0), cents: slots[$0]) }
+    }
+
+    /// Adjacent slots with the same rate merged: start time → U/h (cents).
+    static func slotSegments(_ slots: [Int]) -> [(start: String, cents: Int)] {
+        var result: [(start: String, cents: Int)] = []
+        for (i, value) in slots.enumerated() where result.last?.cents != value {
+            result.append((start: slotStart(i), cents: value))
+        }
+        return result
+    }
+
+    /// U/d delivered by the 48 slots (each half an hour).
+    static func slotDailyTotal(_ slots: [Int]) -> Decimal {
+        Decimal(slots.reduce(0, +)) / 200
+    }
+
+    static func centsText(_ cents: Int) -> String {
+        String(format: "%d.%02d", cents / 100, cents % 100)
+    }
+
+    private static func slotStart(_ slot: Int) -> String {
+        String(format: "%02d:%02d", slot / 2, slot % 2 * 30)
     }
 
     // MARK: Totals

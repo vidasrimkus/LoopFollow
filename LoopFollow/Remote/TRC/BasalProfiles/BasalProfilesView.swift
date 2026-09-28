@@ -1,6 +1,7 @@
 // LoopFollow
 // BasalProfilesView.swift
 
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -21,6 +22,15 @@ struct ActiveBasalSnapshot {
     var hourly: [Decimal]? { BasalProfileMath.hourly(fromNightscout: entries) }
     var hash: String? { entries.isEmpty ? nil : BasalProfileMath.hash(ofNightscout: entries) }
     var total: Decimal? { hourly.map(BasalProfileMath.dailyTotal) }
+    /// The 48 half-hour values `hash` is computed from; shown by "Dabar Trio'je".
+    var slots: [Int]? { entries.isEmpty ? nil : BasalProfileMath.nightscoutSlots(entries) }
+
+    /// "HH:MM (prieš N min)", or "Unknown (…)" when older than 15 min; "Unknown" when never loaded.
+    func receivedText(now: TimeInterval = Date().timeIntervalSince1970) -> String {
+        guard let loadedAt, !entries.isEmpty else { return "Unknown" }
+        let text = "\(BasalProfileFormat.clock(Date(timeIntervalSince1970: loadedAt))) (\(ageText(now: now)))"
+        return isStale(now: now) ? "Unknown — \(text)" : text
+    }
 
     func isStale(now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
         guard let loadedAt, !entries.isEmpty else { return true }
@@ -114,6 +124,56 @@ final class BasalProfilesUIState: ObservableObject {
 
     @Published var activation: BasalActivationRequest?
     @Published var editing: BasalProfileDraft?
+    @Published var currentView: CurrentBasalRequest?
+}
+
+/// Read-only view of Trio's active schedule, frozen at the tap.
+struct CurrentBasalRequest: Identifiable {
+    let id = UUID()
+    let snapshot: ActiveBasalSnapshot
+    let capturedAt: Date
+}
+
+/// "Dabar Trio'je" full table: the same 48 half-hour values the expected hash is computed from. No sending here.
+struct CurrentBasalView: View {
+    let snapshot: ActiveBasalSnapshot
+    let capturedAt: Date
+    let matchName: String?
+
+    var body: some View {
+        Form {
+            if let slots = snapshot.slots {
+                Section {
+                    HStack { Text("Paros suma"); Spacer(); Text("\(BasalProfileFormat.rate(BasalProfileMath.slotDailyTotal(slots))) U/d") }
+                    HStack {
+                        Text("Gauta iš NS")
+                        Spacer()
+                        Text(snapshot.receivedText(now: capturedAt.timeIntervalSince1970))
+                            .foregroundColor(snapshot.isStale(now: capturedAt.timeIntervalSince1970) ? .orange : .secondary)
+                    }
+                    if let matchName {
+                        HStack { Text("Profilis"); Spacer(); Text(matchName).foregroundColor(.secondary) }
+                    } else {
+                        Text("Neatitinka nė vieno išsaugoto profilio.").foregroundColor(.orange)
+                    }
+                }
+                Section(header: Text("Laikas | U/h")) {
+                    ForEach(Array(BasalProfileMath.slotRows(slots).enumerated()), id: \.offset) { _, row in
+                        HStack {
+                            Text(row.start)
+                            Spacer()
+                            Text(BasalProfileMath.centsText(row.cents))
+                        }
+                        .monospacedDigit()
+                    }
+                }
+            } else {
+                Text("Nightscout profilio dar nėra.").foregroundColor(.secondary)
+            }
+        }
+        .navigationTitle("Dabar Trio'je")
+        .navigationBarTitleDisplayMode(.inline)
+    }
 }
 
 struct BasalProfilesView: View {
@@ -137,35 +197,55 @@ struct BasalProfilesView: View {
             if device.value != "Trio" {
                 Text("Remote commands are currently only available for Trio.").foregroundColor(.secondary)
             }
-            Section(header: Text("Dabartinis Trio grafikas (Nightscout)")) {
-                if let total = active.total {
-                    HStack { Text("Paros suma"); Spacer(); Text("\(BasalProfileFormat.rate(total)) U/d").foregroundColor(.secondary) }
-                } else if !active.entries.isEmpty {
-                    Text("Grafikas turi segmentų ne nuo sveikos valandos — jo negalima išsaugoti kaip profilio.").foregroundColor(.orange)
+            Section(header: Text("Dabar Trio'je")) {
+                if let slots = active.slots {
+                    // Tap opens a read-only 24-row table; nothing is sent from there.
+                    Button {
+                        ui.currentView = CurrentBasalRequest(snapshot: active, capturedAt: Date())
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(BasalProfileMath.slotSegments(slots).enumerated()), id: \.offset) { _, segment in
+                                HStack {
+                                    Text(segment.start).monospacedDigit()
+                                    Spacer()
+                                    Text("\(BasalProfileMath.centsText(segment.cents)) U/h").monospacedDigit()
+                                }
+                            }
+                            HStack {
+                                Text("Paros suma").bold()
+                                Spacer()
+                                Text("\(BasalProfileFormat.rate(BasalProfileMath.slotDailyTotal(slots))) U/d").bold()
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if let match = BasalActiveMarker.matchingProfile(profiles.value, activeID: activeID.value, nsHash: active.hash) {
+                        HStack { Text("Profilis"); Spacer(); Text(match.name).foregroundColor(.secondary) }
+                    } else {
+                        Text("Neatitinka nė vieno išsaugoto profilio.").foregroundColor(.orange)
+                    }
+                    if active.hourly == nil {
+                        Text("Grafikas turi segmentų ne nuo sveikos valandos — jo negalima išsaugoti kaip profilio.")
+                            .foregroundColor(.orange)
+                    }
                 } else {
                     Text("Nightscout profilio dar nėra.").foregroundColor(.secondary)
                 }
-                HStack { Text("Duomenys"); Spacer(); Text(active.ageText()).foregroundColor(active.isStale() ? .orange : .secondary) }
+                HStack {
+                    Text("Gauta iš NS")
+                    Spacer()
+                    Text(active.receivedText()).foregroundColor(active.isStale() ? .orange : .secondary)
+                }
                 Button("Atnaujinti") {
                     TaskScheduler.shared.rescheduleTask(id: .profile, to: Date())
                     active = ActiveBasalSnapshot.current()
                 }
-                Button("Išsaugoti dabartinį kaip…") {
+                Button("Išsaugoti kaip profilį…") {
                     newName = ""
                     showSaveCurrent = true
                 }
                 .disabled(active.hourly == nil)
-            }
-
-            if BasalActiveMarker.noSavedMatch(profiles.value, nsHash: active.hash) {
-                Section {
-                    Text("Aktyvus grafikas pompoje neatitinka nė vieno išsaugoto profilio.").foregroundColor(.orange)
-                    Button("Išsaugoti dabartinį kaip…") {
-                        newName = ""
-                        showSaveCurrent = true
-                    }
-                    .disabled(active.hourly == nil)
-                }
             }
 
             Section(header: Text("Profiliai")) {
@@ -240,6 +320,23 @@ struct BasalProfilesView: View {
         .sheet(item: $ui.editing) { _ in
             BasalProfileEditorView(ui: ui) { saved in upsert(saved) }
                 .interactiveDismissDisabled() // only "Atšaukti" / "Išsaugoti" close it; a swipe would lose the draft
+        }
+        .sheet(item: $ui.currentView) { request in
+            NavigationStack {
+                CurrentBasalView(
+                    snapshot: request.snapshot,
+                    capturedAt: request.capturedAt,
+                    matchName: BasalActiveMarker.matchingProfile(profiles.value, activeID: activeID.value, nsHash: request.snapshot.hash)?.name
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Uždaryti") { ui.currentView = nil } }
+                }
+            }
+        }
+        .onReceive(Observable.shared.nsProfileLoadedAt.$value.dropFirst().receive(on: DispatchQueue.main)) { _ in
+            // A finished Nightscout profile load (e.g. after "Atnaujinti") refreshes the section. Open sheets keep
+            // their own snapshots and live in BasalProfilesUIState, so this redraw does not touch them.
+            active = ActiveBasalSnapshot.current()
         }
         .sheet(item: $ui.activation) { request in
             NavigationStack {

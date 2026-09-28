@@ -228,6 +228,72 @@ struct BasalProfileTests {
         #expect(BasalProfileList.profile(id: b.id, in: afterAdd)?.name == "Second")
     }
 
+    // MARK: "Dabar Trio'je" shows what the hash is computed from
+
+    @Test("Displayed slots are the hash input: hash(ofSlots: slots) == hash(ofNightscout:) for Trio vectors V1–V6")
+    func displayedSlotsAreHashInput() {
+        let vectors: [([(seconds: Int, rate: Double)], String)] = [
+            (vector1NS, "5c367b5397636149"),
+            ([(0, 1.0)], "946f8ef5ec7fc61e"),
+            ([(0, 0.35), (25200, 1.2), (79200, 0.45)], "eabd566dccabc3e6"),
+            ([(0, 0.4), (9000, 0.5), (18000, 0.6)], "acff0d328fca2e73"),
+            ([(0, 0.4), (7200, 0.55)], "b692201fbdc3d38e"),
+            ([(21600, 0.5), (72000, 0.3)], "69f813145c518801"),
+        ]
+        for (entries, expected) in vectors {
+            let snapshot = ActiveBasalSnapshot(entries: entries, loadedAt: 0)
+            let slots = snapshot.slots!
+            #expect(slots.count == 48)
+            #expect(BasalProfileMath.hash(ofSlots: slots) == expected)
+            #expect(snapshot.hash == expected)
+        }
+    }
+
+    @Test("V1 table: 24 hourly rows equal to the slots and to hourly(fromNightscout:); segments merged; total")
+    func v1Rows() {
+        let slots = BasalProfileMath.nightscoutSlots(vector1NS)
+        let rows = BasalProfileMath.slotRows(slots)
+        let v1Hourly = BasalProfileMath.hourly(fromNightscout: vector1NS)!
+        #expect(rows.count == 24)
+        #expect(rows.map(\.start) == (0 ..< 24).map { String(format: "%02d:00", $0) })
+        #expect(rows.map { Decimal($0.cents) / 100 } == v1Hourly)
+        #expect(rows.map(\.cents) == stride(from: 0, to: 48, by: 2).map { slots[$0] })
+        let segments = BasalProfileMath.slotSegments(slots)
+        #expect(segments.map(\.start) == ["00:00", "02:00", "05:00", "10:00", "13:00", "19:00"])
+        #expect(segments.map(\.cents) == [40, 55, 60, 70, 40, 45])
+        #expect(BasalProfileMath.slotDailyTotal(slots) == BasalProfileMath.dailyTotal(v1Hourly))
+    }
+
+    @Test("A 30-minute schedule (V4) shows all 48 half-hours; the 02:30 change is visible")
+    func halfHourRows() {
+        let slots = BasalProfileMath.nightscoutSlots([(0, 0.4), (9000, 0.5), (18000, 0.6)])
+        let rows = BasalProfileMath.slotRows(slots)
+        #expect(rows.count == 48)
+        #expect(rows[4].start == "02:00" && rows[4].cents == 40)
+        #expect(rows[5].start == "02:30" && rows[5].cents == 50)
+        #expect(BasalProfileMath.slotSegments(slots).map(\.start) == ["00:00", "02:30", "05:00"])
+        #expect(BasalProfileMath.centsText(5) == "0.05" && BasalProfileMath.centsText(120) == "1.20")
+    }
+
+    @Test("Received text: Unknown when never loaded or older than 15 min")
+    func receivedText() {
+        let fresh = ActiveBasalSnapshot(entries: vector1NS, loadedAt: 1000)
+        #expect(!fresh.receivedText(now: 1000 + 60).hasPrefix("Unknown"))
+        #expect(fresh.receivedText(now: 1000 + 16 * 60).hasPrefix("Unknown"))
+        #expect(ActiveBasalSnapshot(entries: vector1NS, loadedAt: nil).receivedText(now: 1000) == "Unknown")
+        #expect(ActiveBasalSnapshot(entries: [], loadedAt: 1000).receivedText(now: 1000) == "Unknown")
+    }
+
+    @Test("Matching profile: the active one if it matches, else the oldest match, else none")
+    func matchingProfile() {
+        let a = original()
+        let c = copy(of: a)
+        let ns = BasalProfileMath.hash(ofHourly: a.hourlyRates)
+        #expect(BasalActiveMarker.matchingProfile([c, a], activeID: c.id, nsHash: ns)?.id == c.id)
+        #expect(BasalActiveMarker.matchingProfile([c, a], activeID: nil, nsHash: ns)?.id == a.id)
+        #expect(BasalActiveMarker.matchingProfile([c, a], activeID: a.id, nsHash: "0000000000000000") == nil)
+    }
+
     // MARK: Active marker
 
     private func original() -> BasalProfile {
