@@ -75,8 +75,11 @@ schedule with the same expected hash is safe on the Trio side). Omnipod DASH is 
 it. The existing QR settings export is not extended (several profiles would exceed a QR code); profiles are
 exported/imported as a JSON file from the Basal Profiles screen.
 The list does not observe Nightscout live: the active schedule is a snapshot taken on appear and on
-"Atnaujinti"; a row opens activation through `@State` (not a `NavigationLink` inside the Form) with the schedule
-snapshot and time taken at the tap — the "dabar (HH:MM)" column and on-screen warning use it. "Aktyvuoti" reads the
+"Atnaujinti". Activation and the editor open as sheets driven by `BasalProfilesUIState.shared` (activation request by
+profile id + schedule snapshot and time taken at the tap; editor draft), not by the list's own `@State`
+(`fix/basal-editor-dismiss-2`: a second-level push held in the pushed list's `@State` closed 2–3 s after opening, on
+the devicestatus-driven redraw). The editor writes nothing until "Išsaugoti"; swipe-to-dismiss is off. The
+"dabar (HH:MM)" column and on-screen warning use the snapshot. "Aktyvuoti" reads the
 active schedule once more: the confirmation text (warns if it changed since HH:MM), the expected hash and the
 "Ankstesnis" backup come from that read.
 Manual check (no UI tests): open the editor and, separately, an activation screen, leave each open ≥ 6 min while
@@ -85,7 +88,8 @@ Nightscout updates arrive — both stay open, entered values stay.
 **Tests.** `Tests/BasalProfileTests.swift`: Trio hash vectors V1–V5 (Nightscout form, sent segments, hourly;
 split-independence incl. [02:00 0.55, 03:00 0.55] == [02:00 0.55] and 30-minute segments), merge,
 Nightscout → 24 h, the Trio validation examples (0.29, 1.15, 2.05, 2.30 refused; 0.57 and everyday rates pass),
-totals, JSON, whole APNS body < 4 KB with 24 segments and a 30-character name, storage round trip.
+totals, JSON, whole APNS body < 4 KB with 24 segments and a 30-character name, storage round trip; ids kept by the
+Storage encoding and by `BasalProfileList.upsert` (other profiles unchanged).
 
 ## 3. Fork CI
 

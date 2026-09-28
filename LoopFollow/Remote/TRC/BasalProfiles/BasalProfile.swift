@@ -22,6 +22,23 @@ struct BasalProfile: Codable, Equatable, Identifiable {
     }
 }
 
+/// Changes to the saved list. Every profile keeps its id: screens are opened by id, so an id that changed on a
+/// write would close them.
+enum BasalProfileList {
+    /// Replaces the profile with the same id, or appends it; no other element is touched.
+    static func upsert(_ profile: BasalProfile, into list: [BasalProfile], now: Date = Date()) -> [BasalProfile] {
+        var list = list
+        var updated = profile
+        updated.updatedAt = now
+        if let i = list.firstIndex(where: { $0.id == profile.id }) { list[i] = updated } else { list.append(updated) }
+        return list
+    }
+
+    static func profile(id: UUID, in list: [BasalProfile]) -> BasalProfile? {
+        list.first { $0.id == id }
+    }
+}
+
 /// One segment of the `basal_schedule` array Trio accepts (Trio `RemoteBasalSchedule.Segment`).
 struct BasalScheduleSegment: Codable, Equatable {
     let start: String // "HH:00"

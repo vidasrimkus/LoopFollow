@@ -193,4 +193,38 @@ struct BasalProfileTests {
         let back = try BasalProfilesDocument.decoder.decode([BasalProfile].self, from: data)
         #expect(back.count == 1 && back[0].hourlyRates == p.hourlyRates && back[0].name == "Test" && back[0].id == p.id)
     }
+
+    @Test("Storage format (plain JSONEncoder/Decoder, as StorageValue) keeps every id; decoding twice gives the same id")
+    func storageKeepsIDs() throws {
+        let list = [
+            BasalProfile(name: "First", hourlyRates: hourly([(0, "0.4")])),
+            BasalProfile(name: "Second", hourlyRates: hourly([(0, "0.5")])),
+        ]
+        let data = try JSONEncoder().encode(list)
+        let first = try JSONDecoder().decode([BasalProfile].self, from: data)
+        let second = try JSONDecoder().decode([BasalProfile].self, from: data)
+        #expect(first.map(\.id) == list.map(\.id))
+        #expect(second.map(\.id) == list.map(\.id))
+        #expect(first.map(\.name) == ["First", "Second"])
+    }
+
+    @Test("Upsert changes only the edited profile; other profiles keep id and content; new profile appended")
+    func upsertKeepsOtherIDs() {
+        let a = BasalProfile(name: "First", hourlyRates: hourly([(0, "0.4")]))
+        let b = BasalProfile(name: "Second", hourlyRates: hourly([(0, "0.5")]))
+        var edited = b
+        edited.hourlyRates = hourly([(0, "0.6")])
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let afterEdit = BasalProfileList.upsert(edited, into: [a, b], now: now)
+        #expect(afterEdit.map(\.id) == [a.id, b.id])
+        #expect(afterEdit[0] == a)
+        #expect(afterEdit[1].hourlyRates == edited.hourlyRates && afterEdit[1].updatedAt == now)
+
+        let c = BasalProfile(name: "Third", hourlyRates: hourly([(0, "0.7")]))
+        let afterAdd = BasalProfileList.upsert(c, into: afterEdit, now: now)
+        #expect(afterAdd.map(\.id) == [a.id, b.id, c.id])
+        #expect(Array(afterAdd.prefix(2)) == afterEdit)
+        #expect(BasalProfileList.profile(id: b.id, in: afterAdd)?.name == "Second")
+    }
 }

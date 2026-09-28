@@ -84,15 +84,43 @@ struct BasalProfilesDocument: FileDocument {
     }
 }
 
+/// Activation opened for one saved profile (by id), with the active schedule and time taken at the tap.
+struct BasalActivationRequest: Identifiable {
+    let id: UUID
+    let snapshot: ActiveBasalSnapshot
+    let capturedAt: Date
+}
+
+/// The editor's unsaved values. Nothing is written to Storage until "Išsaugoti".
+struct BasalProfileDraft: Identifiable {
+    let original: BasalProfile
+    var name: String
+    var texts: [String]
+
+    var id: UUID { original.id }
+
+    init(_ profile: BasalProfile) {
+        original = profile
+        name = profile.name
+        texts = profile.hourlyRates.map(BasalProfileFormat.rate)
+    }
+}
+
+/// Which Basal Profiles sheet is open, and the editor draft — kept outside the views. The Remote screens are
+/// redrawn on every devicestatus fetch (`Storage.device` publishes even when unchanged), and a screen held in the
+/// pushed list's own @State was closed within seconds; state here survives any redraw or re-creation of the list.
+final class BasalProfilesUIState: ObservableObject {
+    static let shared = BasalProfilesUIState()
+
+    @Published var activation: BasalActivationRequest?
+    @Published var editing: BasalProfileDraft?
+}
+
 struct BasalProfilesView: View {
     @ObservedObject private var profiles = Storage.shared.basalProfiles
     @ObservedObject private var device = Storage.shared.device
+    @ObservedObject private var ui = BasalProfilesUIState.shared
 
-    @State private var editing: BasalProfile?
-    /// The open activation screen: profile plus the schedule snapshot taken at the tap. Drives a link outside the lazy
-    /// Form rows; kept after closing so the pop animation still has its content.
-    @State private var activating: (profile: BasalProfile, snapshot: ActiveBasalSnapshot, at: Date)?
-    @State private var showActivation = false
     @State private var showSaveCurrent = false
     @State private var newName = ""
     @State private var showExporter = false
@@ -135,8 +163,7 @@ struct BasalProfilesView: View {
                 ForEach(profiles.value) { profile in
                     let isActive = active.hash == BasalProfileMath.hash(ofHourly: profile.hourlyRates)
                     Button {
-                        activating = (profile, ActiveBasalSnapshot.current(), Date())
-                        showActivation = true
+                        ui.activation = BasalActivationRequest(id: profile.id, snapshot: ActiveBasalSnapshot.current(), capturedAt: Date())
                     } label: {
                         HStack {
                             VStack(alignment: .leading) {
@@ -146,13 +173,12 @@ struct BasalProfilesView: View {
                             }
                             Spacer()
                             if isActive { Image(systemName: "checkmark").foregroundColor(.green) }
-                            Image(systemName: "chevron.right").foregroundColor(.secondary)
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .swipeActions {
-                        Button("Redaguoti") { editing = profile }.tint(.blue)
+                        Button("Redaguoti") { ui.editing = BasalProfileDraft(profile) }.tint(.blue)
                         Button("Kopijuoti") { copy(profile) }.tint(.gray)
                         if !isActive {
                             Button("Trinti", role: .destructive) { delete(profile) }
@@ -163,27 +189,37 @@ struct BasalProfilesView: View {
 
             Section {
                 Button("Naujas profilis") {
-                    editing = BasalProfile(name: "", hourlyRates: active.hourly ?? Array(repeating: Decimal(string: "0.5")!, count: 24))
+                    ui.editing = BasalProfileDraft(
+                        BasalProfile(name: "", hourlyRates: active.hourly ?? Array(repeating: Decimal(string: "0.5")!, count: 24))
+                    )
                 }
                 Button("Eksportuoti (JSON)") { showExporter = true }.disabled(profiles.value.isEmpty)
                 Button("Importuoti (JSON)") { showImporter = true }
             }
         }
-        .background(
-            NavigationLink(
-                destination: activating.map { BasalProfileActivationView(profile: $0.profile, active: $0.snapshot, capturedAt: $0.at) },
-                isActive: $showActivation
-            ) { EmptyView() }
-                .hidden()
-        )
         .navigationTitle("Basal Profiles")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             TaskScheduler.shared.rescheduleTask(id: .profile, to: Date())
             active = ActiveBasalSnapshot.current()
         }
-        .sheet(item: $editing) { profile in
-            BasalProfileEditorView(profile: profile) { saved in upsert(saved) }
+        .sheet(item: $ui.editing) { _ in
+            BasalProfileEditorView(ui: ui) { saved in upsert(saved) }
+                .interactiveDismissDisabled() // only "Atšaukti" / "Išsaugoti" close it; a swipe would lose the draft
+        }
+        .sheet(item: $ui.activation) { request in
+            NavigationStack {
+                Group {
+                    if let profile = BasalProfileList.profile(id: request.id, in: profiles.value) {
+                        BasalProfileActivationView(profile: profile, active: request.snapshot, capturedAt: request.capturedAt)
+                    } else {
+                        Text("Profilis ištrintas.").foregroundColor(.secondary)
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Uždaryti") { ui.activation = nil } }
+                }
+            }
         }
         .alert("Išsaugoti dabartinį kaip", isPresented: $showSaveCurrent) {
             TextField("Pavadinimas", text: $newName)
@@ -207,11 +243,7 @@ struct BasalProfilesView: View {
     // MARK: - Actions
 
     private func upsert(_ profile: BasalProfile) {
-        var list = profiles.value
-        var updated = profile
-        updated.updatedAt = Date()
-        if let i = list.firstIndex(where: { $0.id == profile.id }) { list[i] = updated } else { list.append(updated) }
-        profiles.value = list
+        profiles.value = BasalProfileList.upsert(profile, into: profiles.value)
     }
 
     private func copy(_ profile: BasalProfile) {
@@ -256,18 +288,24 @@ struct BasalProfilesView: View {
 
 // MARK: - Editor
 
+/// Edits `ui.editing` (the draft lives there, not in this view, so a redraw or re-creation keeps typed values).
 struct BasalProfileEditorView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var name: String
-    @State private var texts: [String]
-    private let original: BasalProfile
-    private let onSave: (BasalProfile) -> Void
+    @ObservedObject var ui: BasalProfilesUIState
+    let onSave: (BasalProfile) -> Void
 
-    init(profile: BasalProfile, onSave: @escaping (BasalProfile) -> Void) {
-        original = profile
-        self.onSave = onSave
-        _name = State(initialValue: profile.name)
-        _texts = State(initialValue: profile.hourlyRates.map(BasalProfileFormat.rate))
+    private var original: BasalProfile? { ui.editing?.original }
+    private var name: String { ui.editing?.name ?? "" }
+    private var texts: [String] { ui.editing?.texts ?? [] }
+
+    private var nameBinding: Binding<String> {
+        Binding(get: { ui.editing?.name ?? "" }, set: { ui.editing?.name = $0 })
+    }
+
+    private func textBinding(_ hour: Int) -> Binding<String> {
+        Binding(
+            get: { ui.editing.map { hour < $0.texts.count ? $0.texts[hour] : "" } ?? "" },
+            set: { value in if let count = ui.editing?.texts.count, hour < count { ui.editing?.texts[hour] = value } }
+        )
     }
 
     private var hourly: [Decimal] {
@@ -279,13 +317,13 @@ struct BasalProfileEditorView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text("Pavadinimas")) { TextField("Pavadinimas", text: $name) }
+                Section(header: Text("Pavadinimas")) { TextField("Pavadinimas", text: nameBinding) }
                 Section(header: Text("Paros suma: \(BasalProfileFormat.rate(BasalProfileMath.dailyTotal(hourly))) U/d")) {
                     ForEach(0 ..< BasalProfileMath.hours, id: \.self) { hour in
                         HStack {
                             Text(String(format: "%02d:00", hour)).monospacedDigit()
                             Spacer()
-                            TextField("U/h", text: $texts[hour])
+                            TextField("U/h", text: textBinding(hour))
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 80)
@@ -299,19 +337,19 @@ struct BasalProfileEditorView: View {
                     }
                 }
             }
-            .navigationTitle(original.name.isEmpty ? "Naujas profilis" : "Redaguoti")
+            .navigationTitle((original?.name ?? "").isEmpty ? "Naujas profilis" : "Redaguoti")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Atšaukti") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Atšaukti") { ui.editing = nil } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Išsaugoti") {
-                        var saved = original
+                        guard var saved = original else { return }
                         saved.name = name.trimmingCharacters(in: .whitespaces)
                         saved.hourlyRates = hourly
                         onSave(saved)
-                        dismiss()
+                        ui.editing = nil
                     }
-                    .disabled(!problems.isEmpty)
+                    .disabled(original == nil || !problems.isEmpty)
                 }
             }
         }
