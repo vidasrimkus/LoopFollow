@@ -28,6 +28,10 @@ struct BasalProfileTests {
         #expect(BasalProfileMath.hash(ofNightscout: [(0, 0.35), (25200, 1.2), (79200, 0.45)]) == "eabd566dccabc3e6") // V3
         #expect(BasalProfileMath.hash(ofNightscout: [(0, 0.4), (9000, 0.5), (18000, 0.6)]) == "acff0d328fca2e73") // V4, 02:30
         #expect(BasalProfileMath.hash(ofNightscout: [(0, 0.4), (7200, 0.55)]) == "b692201fbdc3d38e") // V5
+        // V6: not starting at 00:00 — wraps to the last entry; hourly(fromNightscout:) refuses it.
+        #expect(BasalProfileMath.hash(ofNightscout: [(21600, 0.5), (72000, 0.3)]) == "69f813145c518801")
+        #expect(BasalProfileMath.hash(ofNightscout: [(72000, 0.3), (21600, 0.5)]) == "69f813145c518801")
+        #expect(BasalProfileMath.hourly(fromNightscout: [(21600, 0.5), (72000, 0.3)]) == nil)
         #expect(BasalProfileMath.hash(ofNightscout: Array(vector1NS.reversed())) == "5c367b5397636149")
     }
 
@@ -87,6 +91,27 @@ struct BasalProfileTests {
         for near in BasalProfileMath.nearestExact(d(rate)) {
             #expect(BasalProfileMath.danaStoredCents(near) == BasalProfileMath.exactCents(near))
         }
+    }
+
+    /// Trio CUSTOMIZATIONS.md §7 "Dana truncation vector": the 65 rates in 0.01–5.00 U/h that Decimal →
+    /// Double(truncating:) → UInt16(× 100) stores differently. Trio's own test must produce the same list.
+    static let danaTruncatedCents: [Int] = [
+        7, 14, 28, 29, 33, 56, 58, 66, 87, 91, 107, 111, 112, 115, 116, 132, 157, 174, 179, 182, 199, 205, 207, 214,
+        222, 224, 230, 232, 239, 247, 249, 255, 264, 289, 314, 323, 333, 339, 348, 358, 364, 373, 383, 389, 398, 403,
+        410, 414, 419, 423, 428, 435, 439, 444, 448, 453, 460, 464, 469, 473, 478, 485, 489, 494, 498,
+    ]
+
+    @Test("Dana truncation table 0.01–5.00 U/h matches Trio's shared vector")
+    func danaTruncationTable() {
+        var stored: [Int] = []
+        var validated: [Int] = []
+        for cents in 1 ... 500 {
+            let rate = d(String(format: "%d.%02d", cents / 100, cents % 100))
+            if BasalProfileMath.danaStoredCents(rate) != cents { stored.append(cents) }
+            if !BasalProfileMath.validate(name: "Test", hourly: Array(repeating: rate, count: 24)).isEmpty { validated.append(cents) }
+        }
+        #expect(stored == Self.danaTruncatedCents)
+        #expect(validated == Self.danaTruncatedCents)
     }
 
     @Test("Everyday rates pass", arguments: ["0.4", "0.45", "0.55", "0.57", "0.6", "0.7", "1.0", "1.1", "1.2"])
