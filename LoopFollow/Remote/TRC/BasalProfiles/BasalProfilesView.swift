@@ -174,24 +174,41 @@ struct BasalProfilesView: View {
                 }
                 ForEach(profiles.value) { profile in
                     let state = BasalActiveMarker.rowState(profile, activeID: activeID.value, nsHash: active.hash)
-                    Button {
-                        ui.activation = BasalActivationRequest(id: profile.id, snapshot: ActiveBasalSnapshot.current(), capturedAt: Date())
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(profile.name).font(.headline)
-                                Text("\(BasalProfileFormat.rate(BasalProfileMath.dailyTotal(profile.hourlyRates))) U/d")
-                                    .font(.subheadline).foregroundColor(.secondary)
-                                if state == .matchesActive {
-                                    Text("sutampa su aktyviu").font(.caption).foregroundColor(.secondary)
+                    // Tap on the name opens the editor; "Aktyvuoti" and the "…" menu are separate buttons in the row
+                    // (borderless styles, so each takes only its own taps).
+                    HStack {
+                        Button { ui.editing = BasalProfileDraft(profile) } label: {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(profile.name).font(.headline)
+                                    Text("\(BasalProfileFormat.rate(BasalProfileMath.dailyTotal(profile.hourlyRates))) U/d")
+                                        .font(.subheadline).foregroundColor(.secondary)
+                                    if state == .matchesActive {
+                                        Text("sutampa su aktyviu").font(.caption).foregroundColor(.secondary)
+                                    }
                                 }
+                                Spacer()
+                                if state == .active { Image(systemName: "checkmark").foregroundColor(.green) }
                             }
-                            Spacer()
-                            if state == .active { Image(systemName: "checkmark").foregroundColor(.green) }
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.borderless)
+                        .foregroundColor(.primary)
+
+                        Button("Aktyvuoti") {
+                            ui.activation = BasalActivationRequest(id: profile.id, snapshot: ActiveBasalSnapshot.current(), capturedAt: Date())
+                        }
+                        .buttonStyle(.bordered)
+
+                        Menu {
+                            Button("Kopijuoti") { copy(profile) }
+                            Button("Trinti", role: .destructive) { delete(profile) }
+                                .disabled(!BasalActiveMarker.canDelete(profile, activeID: activeID.value))
+                        } label: {
+                            Image(systemName: "ellipsis.circle").imageScale(.large)
+                        }
+                        .buttonStyle(.borderless)
                     }
-                    .buttonStyle(.plain)
                     .swipeActions {
                         Button("Redaguoti") { ui.editing = BasalProfileDraft(profile) }.tint(.blue)
                         Button("Kopijuoti") { copy(profile) }.tint(.gray)

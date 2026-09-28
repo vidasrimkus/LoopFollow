@@ -85,7 +85,9 @@ activation send and by "Išsaugoti dabartinį kaip…", never by "Kopijuoti". �
 hash equals Nightscout's; other profiles with the same hash show a grey "sutampa su aktyviu" and can be deleted; only
 the active id cannot. When no saved profile matches Nightscout an orange note with "Išsaugoti dabartinį kaip…" is
 shown. Without a stored (existing) id — e.g. right after the update — the oldest profile matching Nightscout is taken.
-The activation screen shows the hashes (Nightscout, this profile, expected on send) for diagnostics. "Aktyvuoti" reads the
+The activation screen shows the hashes (Nightscout, this profile, expected on send) for diagnostics.
+Row: tap on the name opens the editor; "Aktyvuoti" button and a "…" menu (Kopijuoti, Trinti — disabled for the
+active id) in the row; swipe actions (Redaguoti, Kopijuoti, Trinti) stay. "Aktyvuoti" reads the
 active schedule once more: the confirmation text (warns if it changed since HH:MM), the expected hash and the
 "Ankstesnis" backup come from that read.
 Manual check (no UI tests): open the editor and, separately, an activation screen, leave each open ≥ 6 min while
