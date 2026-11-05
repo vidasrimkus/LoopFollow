@@ -84,8 +84,27 @@ struct ActiveTherapySnapshot {
     var hash: String? { TherapyProfileMath.nightscoutHash(entries, kind: kind, nsMgdl: nsMgdl) }
     /// As a profile (stored units), or nil when it cannot be represented.
     var storedEntries: [TherapyEntry]? { TherapyProfileMath.storedEntries(fromNightscout: entries, kind: kind, nsMgdl: nsMgdl) }
-    /// ISF uploaded in mmol/L: a saved copy is rebuilt from 0.1 mmol/L and may differ from Trio's mg/dL by 1.
-    var isReconstructed: Bool { kind == .isf && !nsMgdl }
+    /// Every Nightscout value is exact in its unit (whole tenths of g/U, whole mg/dL, whole tenths of mmol/L).
+    var isExact: Bool { TherapyProfileMath.nightscoutIsExact(entries, kind: kind, nsMgdl: nsMgdl) }
+    /// A saved copy may differ from Trio's own values: ISF uploaded in mmol/L (rebuilt as the smallest mg/dL of each
+    /// 0.1 mmol/L group — what Trio's mmol/L editor stores), or Nightscout values not exact in their unit (rounded).
+    var isReconstructed: Bool { (kind == .isf && !nsMgdl) || !isExact }
+    /// Trio's glucose unit as its Nightscout profile shows it; nil while no profile is loaded.
+    var trioMmol: Bool? { entries.isEmpty ? nil : !nsMgdl }
+
+    /// Why a saved copy is not exactly Trio's schedule; shown with "Dabar Trio'je", "Išsaugoti…" and "Ankstesnis".
+    var reconstructionNote: String? {
+        var notes: [String] = []
+        if !isExact {
+            notes.append(kind == .carbRatio
+                ? "Nightscout CR ne 0.1 g/U tikslumu — išsaugota suapvalinta."
+                : "Nightscout ISF ne \(nsMgdl ? "sveikų mg/dL" : "0.1 mmol/L") tikslumu — išsaugota suapvalinta.")
+        }
+        if kind == .isf, !nsMgdl {
+            notes.append("ISF atkurtas iš mmol/L (mažiausia grupės mg/dL, kaip Trio mmol/L redaktorius); Trio esamos mg/dL gali skirtis ±1.")
+        }
+        return notes.isEmpty ? nil : notes.joined(separator: " ")
+    }
 
     /// The 48 slots in the unit shown.
     func displaySlots(mmol: Bool) -> [Int]? {
@@ -112,14 +131,41 @@ struct ActiveTherapySnapshot {
 // MARK: - Change summary (activation)
 
 enum TherapyChange {
-    /// Rows for "laikas | dabar | naujas | Δ" in the unit shown.
-    static func rows(profile: TherapyProfile, active: ActiveTherapySnapshot, mmol: Bool) -> [TherapyProfileMath.ComparisonRow] {
-        let new = TherapyProfileMath.slots(profile.entries).map { TherapyProfileMath.displayValue($0, kind: profile.kind, mmol: mmol) }
-        return TherapyProfileMath.comparisonRows(now: active.displaySlots(mmol: mmol), new: new)
+    /// Rows in Nightscout form: Trio's slots now against the profile's slots as Nightscout would show them (same units).
+    /// Directions and the > 20 % warning are decided on these integers; the unit shown is applied only to the text.
+    static func rows(profile: TherapyProfile, active: ActiveTherapySnapshot) -> [TherapyProfileMath.ComparisonRow] {
+        let new = TherapyProfileMath.nightscoutFormSlots(profile.entries, kind: profile.kind, nsMgdl: active.nsMgdl)
+        return TherapyProfileMath.comparisonRows(now: active.slots, new: new)
+    }
+
+    /// The profile as it may be sent: ISF snapped to Trio's mmol/L editor values when Trio runs in mmol/L (Trio refuses
+    /// anything else), with a note per changed entry. Same Nightscout form, so the hash and ✓ are unchanged.
+    static func sendable(_ profile: TherapyProfile, trioMmol: Bool) -> (profile: TherapyProfile, notes: [String]) {
+        let snapped = TherapyProfileMath.snappedForTrio(profile.entries, kind: profile.kind, trioMmol: trioMmol)
+        var result = profile
+        result.entries = snapped.entries
+        return (result, snapped.notes)
+    }
+
+    /// A Nightscout-form value as text in the unit shown.
+    static func shown(_ value: Int, kind: TherapyKind, nsMgdl: Bool, mmol: Bool) -> String {
+        TherapyProfileMath.displayText(
+            TherapyProfileMath.displayValue(nightscout: value, kind: kind, nsMgdl: nsMgdl, mmol: mmol), kind: kind, mmol: mmol
+        )
+    }
+
+    /// ISF with Trio in mmol/L: Nightscout shows the same 0.1 mmol/L, but the profile's mg/dL differ from the value
+    /// Trio's mmol/L editor would hold for some slot — equal on screen, not necessarily in mg/dL.
+    static func isApproximate(profile: TherapyProfile, active: ActiveTherapySnapshot) -> Bool {
+        guard profile.kind == .isf, !active.nsMgdl, let now = active.slots, now.count == TherapyProfileMath.slotCount else { return false }
+        return zip(TherapyProfileMath.slots(profile.entries), now).contains { mgdl, tenths in
+            TherapyProfileMath.mgdl(fromMmolTenths: tenths) != mgdl
+        }
     }
 
     /// "Daugiau insulino (mažesnis CR): 06:00, 11:00" / "Mažiau insulino (…)" — lower CR or ISF means MORE insulin.
-    static func directionLines(_ rows: [TherapyProfileMath.ComparisonRow], kind: TherapyKind) -> [String] {
+    /// With no change, "Reikšmės nesikeičia." — or, when `approximate`, "≈ (±1 mg/dL)".
+    static func directionLines(_ rows: [TherapyProfileMath.ComparisonRow], kind: TherapyKind, approximate: Bool = false) -> [String] {
         func times(_ direction: TherapyProfileMath.InsulinDirection) -> [String] {
             rows.filter { row in row.now.map { TherapyProfileMath.direction(now: $0, new: row.new) == direction } ?? false }
                 .map { TherapyProfileMath.clock($0.minutes) }
@@ -130,7 +176,11 @@ enum TherapyChange {
         let less = times(.less)
         if !more.isEmpty { lines.append("⬆︎ Daugiau insulino (\(kind.lowerMeans)): \(list(more))") }
         if !less.isEmpty { lines.append("⬇︎ Mažiau insulino (\(kind.higherMeans)): \(list(less))") }
-        if more.isEmpty, less.isEmpty, rows.contains(where: { $0.now != nil }) { lines.append("Reikšmės nesikeičia.") }
+        if more.isEmpty, less.isEmpty, rows.contains(where: { $0.now != nil }) {
+            lines.append(approximate
+                ? "≈ (±1 mg/dL) — Nightscout rodo tas pačias mmol/L reikšmes, mg/dL gali skirtis."
+                : "Reikšmės nesikeičia.")
+        }
         return lines
     }
 
@@ -142,21 +192,23 @@ enum TherapyChange {
         }
     }
 
-    /// Extra warning when any slot changes by more than 20 %.
+    /// Extra warning when any slot changes by more than 20 % (decided in integers on Nightscout-form rows).
     static func bigChangeWarning(_ rows: [TherapyProfileMath.ComparisonRow], kind: TherapyKind) -> String? {
-        guard let big = TherapyProfileMath.largestChange(rows) else { return nil }
-        let direction = big.percent < 0 ? "daugiau insulino" : "mažiau insulino"
+        guard let big = TherapyProfileMath.largestChange(rows), let now = big.now else { return nil }
         return "⚠️ \(kind.shortName) keičiasi daugiau nei 20 %: \(TherapyProfileMath.clock(big.minutes)) "
-            + "\(big.percent > 0 ? "+" : "")\(big.percent) % (\(direction))."
+            + "\(TherapyProfileMath.percentText(now: now, new: big.new)) % (\(TherapyProfileMath.direction(now: now, new: big.new).text))."
     }
 
-    static func deltaText(_ row: TherapyProfileMath.ComparisonRow, kind: TherapyKind, mmol: Bool) -> String {
+    /// Δ in the unit shown, with the rounded percent from the Nightscout-form integers. "≈" when the change is
+    /// smaller than one step of the unit shown (e.g. ISF 100 → 101 mg/dL shown in mmol/L: both 5.6).
+    static func deltaText(_ row: TherapyProfileMath.ComparisonRow, kind: TherapyKind, nsMgdl: Bool, mmol: Bool) -> String {
         guard let now = row.now else { return "" }
-        let d = row.new - now
-        guard d != 0 else { return "0" }
-        let value = TherapyProfileMath.displayText(abs(d), kind: kind, mmol: mmol)
+        guard now != row.new else { return "0" }
+        let display = { TherapyProfileMath.displayValue(nightscout: $0, kind: kind, nsMgdl: nsMgdl, mmol: mmol) }
+        let d = display(row.new) - display(now)
         let pct = TherapyProfileMath.percentChange(now: now, new: row.new).map { " (\($0 > 0 ? "+" : "")\($0) %)" } ?? ""
-        return (d > 0 ? "+" : "-") + value + pct
+        guard d != 0 else { return "≈" + pct }
+        return (d > 0 ? "+" : "-") + TherapyProfileMath.displayText(abs(d), kind: kind, mmol: mmol) + pct
     }
 }
 
@@ -218,15 +270,19 @@ struct TherapyProfileDraft: Identifiable {
     let original: TherapyProfile
     /// App unit when the editor was opened.
     let mmol: Bool
+    /// Trio runs in mmol/L (its Nightscout profile, read when the editor was opened): ISF values are snapped to what
+    /// Trio's mmol/L editor stores, because Trio refuses anything else.
+    let trioMmol: Bool
     var name: String
     var rows: [TherapyDraftRow]
 
     var id: UUID { original.id }
     var kind: TherapyKind { original.kind }
 
-    init(_ profile: TherapyProfile, mmol: Bool) {
+    init(_ profile: TherapyProfile, mmol: Bool, trioMmol: Bool = false) {
         original = profile
         self.mmol = mmol
+        self.trioMmol = trioMmol
         name = profile.name
         var rows = TherapyProfileMath.merged(profile.entries).map { entry -> TherapyDraftRow in
             let text = TherapyProfileMath.editText(entry.value, kind: profile.kind, mmol: mmol)
@@ -241,8 +297,21 @@ struct TherapyProfileDraft: Identifiable {
         self.rows = rows
     }
 
-    /// Rows sorted by start, each value in the stored unit; problems include unparsable values and validation.
-    func parsed() -> (entries: [TherapyEntry], problems: [TherapyProfileMath.Problem]) {
+    /// Rows sorted by start, each value in the stored unit (snapped for Trio in mmol/L, with a note per change);
+    /// problems include unparsable values and validation.
+    func parsed() -> (entries: [TherapyEntry], problems: [TherapyProfileMath.Problem], notes: [String]) {
+        let raw = rawParsed()
+        let snapped = TherapyProfileMath.snappedForTrio(raw.entries, kind: kind, trioMmol: trioMmol)
+        return (snapped.entries, raw.problems, snapped.notes)
+    }
+
+    /// The stored value a row stands for before snapping: unchanged text keeps its stored value, else the parsed text.
+    func value(of row: TherapyDraftRow) -> Int? {
+        if let originalValue = row.originalValue, row.text == row.originalText { return originalValue }
+        return try? TherapyProfileMath.parse(row.text, kind: kind, mmol: mmol).get()
+    }
+
+    private func rawParsed() -> (entries: [TherapyEntry], problems: [TherapyProfileMath.Problem]) {
         var entries: [TherapyEntry] = []
         var parseProblems: [TherapyProfileMath.Problem] = []
         for row in rows.sorted(by: { $0.minutes < $1.minutes }) {
@@ -370,9 +439,7 @@ struct TherapyProfilesView: View {
             profilesSection
             Section {
                 Button("Naujas profilis") {
-                    ui.editing = TherapyProfileDraft(
-                        TherapyProfile(kind: kind, name: "", entries: active.storedEntries ?? kind.defaultEntries), mmol: mmol
-                    )
+                    ui.editing = draft(TherapyProfile(kind: kind, name: "", entries: active.storedEntries ?? kind.defaultEntries))
                 }
                 Button("Eksportuoti (JSON)") { showExporter = true }.disabled(profiles.value.isEmpty)
                 Button("Importuoti (JSON)") { showImporter = true }
@@ -472,6 +539,8 @@ struct TherapyProfilesView: View {
                 if active.storedEntries == nil {
                     Text("Grafike yra laikų ne pusvalandžio tinklelyje arba reikšmių už ribų — jo negalima išsaugoti kaip profilio.")
                         .foregroundColor(.orange)
+                } else if let note = active.reconstructionNote {
+                    Text(note).font(.caption).foregroundColor(.orange)
                 }
             } else {
                 Text("Nightscout profilio dar nėra.").foregroundColor(.secondary)
@@ -501,7 +570,7 @@ struct TherapyProfilesView: View {
             ForEach(profiles.value) { profile in
                 let state = TherapyActiveMarker.rowState(profile, activeID: activeID.value, nsHash: active.hash, nsMgdl: active.nsMgdl)
                 HStack {
-                    Button { ui.editing = TherapyProfileDraft(profile, mmol: mmol) } label: {
+                    Button { ui.editing = draft(profile) } label: {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(profile.name).font(.headline)
@@ -535,7 +604,7 @@ struct TherapyProfilesView: View {
                     .buttonStyle(.borderless)
                 }
                 .swipeActions {
-                    Button("Redaguoti") { ui.editing = TherapyProfileDraft(profile, mmol: mmol) }.tint(.blue)
+                    Button("Redaguoti") { ui.editing = draft(profile) }.tint(.blue)
                     Button("Kopijuoti") { copy(profile) }.tint(.gray)
                     if TherapyActiveMarker.canDelete(profile, activeID: activeID.value) {
                         Button("Trinti", role: .destructive) { delete(profile) }
@@ -557,6 +626,11 @@ struct TherapyProfilesView: View {
 
     // MARK: Actions
 
+    /// Editor draft in the app unit, snapping ISF for Trio in mmol/L (Trio's units read at the tap).
+    private func draft(_ profile: TherapyProfile) -> TherapyProfileDraft {
+        TherapyProfileDraft(profile, mmol: mmol, trioMmol: ActiveTherapySnapshot.current(kind).trioMmol ?? false)
+    }
+
     private func copy(_ profile: TherapyProfile) {
         let name = String("\(profile.name) (kopija)".prefix(TherapyProfileMath.maxNameLength))
         profiles.value.append(TherapyProfile(kind: kind, name: name, entries: profile.entries))
@@ -574,8 +648,8 @@ struct TherapyProfilesView: View {
         let saved = TherapyProfile(kind: kind, name: name.trimmingCharacters(in: .whitespaces), entries: entries)
         profiles.value.append(saved)
         activeID.value = saved.id
-        if active.isReconstructed {
-            message = "Išsaugota. ISF atkurtas iš mmol/L (0.1 tikslumu): Trio mg/dL reikšmės gali skirtis ±1 mg/dL."
+        if let note = active.reconstructionNote {
+            message = "Išsaugota. " + note
         }
     }
 
@@ -666,9 +740,10 @@ struct TherapyProfileEditorView: View {
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 70)
                                 Text(unit).foregroundColor(.secondary)
-                                if kind == .isf, mmol, case let .success(mgdl) = TherapyProfileMath.parse(row.text, kind: kind, mmol: true) {
-                                    Text("\(row.text == row.originalText ? row.originalValue ?? mgdl : mgdl) mg/dL")
-                                        .font(.caption).foregroundColor(.secondary)
+                                if kind == .isf, mmol || draft.trioMmol, let value = draft.value(of: row) {
+                                    let sent = draft.trioMmol ? TherapyProfileMath.trioMmolEditorValue(mgdl: value) : value
+                                    Text("\(sent) mg/dL")
+                                        .font(.caption).foregroundColor(sent == value ? .secondary : .orange)
                                 }
                                 if draft.rows.first?.id != row.id {
                                     Button(role: .destructive) {
@@ -686,6 +761,11 @@ struct TherapyProfileEditorView: View {
                     if !result.problems.isEmpty {
                         Section(header: Text("Klaidos")) {
                             ForEach(result.problems.map(\.text), id: \.self) { Text($0).foregroundColor(.red) }
+                        }
+                    }
+                    if !result.notes.isEmpty {
+                        Section(header: Text("Trio mmol/L")) {
+                            ForEach(result.notes, id: \.self) { Text($0).foregroundColor(.orange) }
                         }
                     }
                 }
@@ -718,7 +798,11 @@ struct TherapyProfileEditorView: View {
     private func addRow() {
         guard let draft = ui.editing, let minutes = draft.nextFreeMinutes() else { return }
         let source = draft.rows.last { $0.minutes < minutes } ?? draft.rows.last
-        ui.editing?.rows.append(TherapyDraftRow(minutes: minutes, text: source?.text ?? ""))
+        // The copy keeps the source's stored value while its text is unchanged, so two rows reading "2.6" cannot
+        // stand for different mg/dL.
+        ui.editing?.rows.append(TherapyDraftRow(
+            minutes: minutes, text: source?.text ?? "", originalText: source?.text, originalValue: source.flatMap { draft.value(of: $0) }
+        ))
         ui.editing?.rows.sort { $0.minutes < $1.minutes }
     }
 }
@@ -743,15 +827,21 @@ struct TherapyProfileActivationView: View {
     @State private var isSending = false
     @State private var result: String?
     @State private var lastSent: (profile: TherapyProfile, hash: String)?
+    /// The profile exactly as it will be sent (ISF snapped for Trio in mmol/L), fixed at the "Aktyvuoti" tap.
+    @State private var frozenProfile: TherapyProfile?
 
     private var kind: TherapyKind { profile.kind }
     private var unit: String { TherapyProfileMath.unit(kind, mmol: mmol) }
 
     var body: some View {
         Form {
-            let rows = TherapyChange.rows(profile: profile, active: active, mmol: mmol)
+            let rows = TherapyChange.rows(profile: profile, active: active)
+            let sendable = TherapyChange.sendable(profile, trioMmol: !active.nsMgdl)
             Section(header: Text("Pokytis")) {
-                ForEach(TherapyChange.directionLines(rows, kind: kind), id: \.self) { Text($0) }
+                ForEach(
+                    TherapyChange.directionLines(rows, kind: kind, approximate: TherapyChange.isApproximate(profile: profile, active: active)),
+                    id: \.self
+                ) { Text($0) }
                 if let warning = TherapyChange.bigChangeWarning(rows, kind: kind) {
                     Text(warning).foregroundColor(.red)
                 }
@@ -769,11 +859,11 @@ struct TherapyProfileActivationView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(TherapyProfileMath.clock(row.minutes))
                         Spacer()
-                        Text(row.now.map { TherapyProfileMath.displayText($0, kind: kind, mmol: mmol) } ?? "—")
+                        Text(row.now.map { TherapyChange.shown($0, kind: kind, nsMgdl: active.nsMgdl, mmol: mmol) } ?? "—")
                             .frame(width: 45, alignment: .trailing).foregroundColor(.secondary)
-                        Text(TherapyProfileMath.displayText(row.new, kind: kind, mmol: mmol)).frame(width: 45, alignment: .trailing)
+                        Text(TherapyChange.shown(row.new, kind: kind, nsMgdl: active.nsMgdl, mmol: mmol)).frame(width: 45, alignment: .trailing)
                         VStack(alignment: .trailing, spacing: 0) {
-                            Text(TherapyChange.deltaText(row, kind: kind, mmol: mmol))
+                            Text(TherapyChange.deltaText(row, kind: kind, nsMgdl: active.nsMgdl, mmol: mmol))
                             if let now = row.now, now != row.new {
                                 Text(TherapyProfileMath.direction(now: now, new: row.new).text).font(.caption2)
                             }
@@ -784,9 +874,10 @@ struct TherapyProfileActivationView: View {
                     .monospacedDigit()
                 }
             }
-            if kind == .isf, mmol {
+            if kind == .isf, mmol || !active.nsMgdl {
                 Section(header: Text("Bus išsaugota (mg/dL), Trio telefono laikas")) {
-                    ForEach(TherapyProfileMath.merged(profile.entries), id: \.minutes) { entry in
+                    ForEach(sendable.notes, id: \.self) { Text($0).foregroundColor(.orange) }
+                    ForEach(TherapyProfileMath.merged(sendable.profile.entries), id: \.minutes) { entry in
                         HStack {
                             Text(TherapyProfileMath.clock(entry.minutes))
                             Spacer()
@@ -822,7 +913,7 @@ struct TherapyProfileActivationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .alert("Aktyvuoti \(kind.shortName) profilį", isPresented: $showConfirm) {
             Button("Aktyvuoti", role: .destructive) {
-                if let hash = frozenHash { activate(hash: hash) }
+                if let hash = frozenHash, let toSend = frozenProfile { activate(toSend, hash: hash) }
             }
             Button("Atšaukti", role: .cancel) {}
         } message: {
@@ -851,9 +942,11 @@ struct TherapyProfileActivationView: View {
     /// that read and not recomputed while shown.
     private func prepareConfirmation() {
         let current = ActiveTherapySnapshot.current(kind)
-        let rows = TherapyChange.rows(profile: profile, active: current, mmol: mmol)
-        var text = profile.name + "\n" + TherapyChange.scheduleLines(profile, mmol: mmol).joined(separator: "\n")
-        let lines = TherapyChange.directionLines(rows, kind: kind)
+        let rows = TherapyChange.rows(profile: profile, active: current)
+        let sendable = TherapyChange.sendable(profile, trioMmol: !current.nsMgdl)
+        var text = profile.name + "\n" + TherapyChange.scheduleLines(sendable.profile, mmol: mmol).joined(separator: "\n")
+        if !sendable.notes.isEmpty { text += "\n\n" + sendable.notes.joined(separator: "\n") }
+        let lines = TherapyChange.directionLines(rows, kind: kind, approximate: TherapyChange.isApproximate(profile: profile, active: current))
         if !lines.isEmpty { text += "\n\n" + lines.joined(separator: "\n") }
         text += "\n\nTrio išsaugos naują \(kind.shortName) grafiką."
         if current.hash != active.hash {
@@ -867,18 +960,19 @@ struct TherapyProfileActivationView: View {
         }
         if current.storedEntries == nil {
             text += "\n\nDabartinio grafiko negalima automatiškai išsaugoti kaip „Ankstesnis“."
-        } else if current.isReconstructed {
-            text += "\n\n„Ankstesnis“ bus atkurtas iš mmol/L (±1 mg/dL)."
+        } else if let note = current.reconstructionNote {
+            text += "\n\n„Ankstesnis“: " + note
         }
         confirmText = text
+        frozenProfile = sendable.profile
         frozenHash = current.hash
         confirmSnapshot = current
         showConfirm = true
     }
 
-    private func activate(hash: String) {
+    private func activate(_ toSend: TherapyProfile, hash: String) {
         saveCurrentAsPrevious()
-        send(profile, hash: hash)
+        send(toSend, hash: hash)
     }
 
     /// Before every activation the schedule being replaced is kept as "Ankstesnis (YYYY-MM-DD HH:MM)", unless a

@@ -119,7 +119,7 @@ mg/dL, nothing written to the pump (no pump restriction). Basal code is untouche
 
 | File | Change |
 |---|---|
-| `LoopFollow/Remote/TRC/TherapyProfiles/TherapyProfile.swift` | New. `TherapyKind` (carbRatio / isf), `TherapyEntry` (start minute, value: CR in tenths of g/U, ISF in mg/dL), `TherapyProfile`, `TherapyProfileList` (upsert keeps ids), `TherapyActiveMarker` (same rules as `BasalActiveMarker`, hash in the Nightscout form for the profile's units), `TherapyProfileMath`: 48 half-hour slots (latest start ≤ minute, else last entry), hashes `cr;…` / `isf-mgdl;…` / `isf-mmol;…` (first 8 bytes of SHA-256), Trio `asMmolL` in integer arithmetic (`(mg×555+500)/1000` tenths), mmol→mg/dL (nearest of 9…540 with the same asMmolL, tie → smaller), Nightscout values rounded half-up from their decimal text, Nightscout → stored entries (refuses off-grid / out-of-range), merge, payload entries, validation mirror, display helpers, comparison rows, direction ("daugiau/mažiau insulino"), > 20 % check, editor input parsing. |
+| `LoopFollow/Remote/TRC/TherapyProfiles/TherapyProfile.swift` | New. `TherapyKind` (carbRatio / isf), `TherapyEntry` (start minute, value: CR in tenths of g/U, ISF in mg/dL), `TherapyProfile`, `TherapyProfileList` (upsert keeps ids), `TherapyActiveMarker` (same rules as `BasalActiveMarker`, hash in the Nightscout form for the profile's units), `TherapyProfileMath`: 48 half-hour slots (latest start ≤ minute, else last entry), hashes `cr;…` / `isf-mgdl;…` / `isf-mmol;…` (first 8 bytes of SHA-256), Trio `asMmolL` in integer arithmetic (`(mg×555+500)/1000` tenths), mmol→mg/dL (contract revised: the SMALLEST of 9…540 with the same asMmolL — what Trio's mmol/L ISF editor stores), `trioMmolEditorValue` / `snappedForTrio`, Nightscout values rounded half-up from their decimal text, Nightscout → stored entries (refuses off-grid / out-of-range), merge, payload entries, validation mirror, display helpers, comparison rows, direction ("daugiau/mažiau insulino"), > 20 % check, editor input parsing. |
 | `LoopFollow/Remote/TRC/TherapyProfiles/TherapyProfilesView.swift` | New. `TherapyProfilesView(kind:)` (list, "Dabar Trio'je", save current, copy/delete/edit, JSON export/import `cr-profiles` / `isf-profiles`), `ActiveTherapySnapshot` (from `ProfileManager.carbRatioSchedule` / `isfSchedule` + `units`; 15-min Unknown), `TherapyProfilesUIState.carbRatio` / `.isf` (activation request, editor draft, current view — id-keyed, outside the views, as `BasalProfilesUIState`), segment editor (00:00 first row fixed, other starts picked in 30-min steps, add/remove), activation view (time \| now \| new \| Δ rows merged where nothing changes, red = more insulin, blue = less; ISF in mmol/L also lists the mg/dL that will be stored). |
 | `TRCCommandType.swift`, `PushMessage.swift`, `PushNotificationManager.swift` | `setCarbRatios = "set_carb_ratios"` ("Carb Ratios"), `setISF = "set_isf"` ("ISF"); `carb_ratio_schedule`, `isf_schedule`, `schedule_name` (nil not encoded; `expected_active_hash` shared with basal); `therapySchedulePayload` / `sendTherapySchedulePushNotification` through `sendEncryptedCommand`. |
 | `TrioRemoteControlView.swift` | "CR Profiles" and "ISF Profiles" tiles; screens `.carbRatioProfiles` / `.isfProfiles` opened by the hidden links outside the `LazyVGrid`. |
@@ -133,11 +133,21 @@ mg/dL, nothing written to the pump (no pump restriction). Basal code is untouche
   the profile's `units` ("mg/dl" → `isf-mgdl`, otherwise `isf-mmol` of value × 10). ✓ / "sutampa su aktyviu" compare
   the saved profile's Nightscout-form hash for the same units — in mmol/L two profiles 1 mg/dL apart (46/47) both
   match, which is all Nightscout can tell.
-- ISF editor in the app unit (Settings → units). mmol/L input step 0.1 → mg/dL by the contract rule; an unchanged
-  row keeps its stored mg/dL (opening and saving a profile in mmol/L does not move 46 → 47). The editor shows the
-  mg/dL next to each mmol/L value.
+- ISF editor in the app unit (Settings → units). mmol/L input step 0.1 → mg/dL = the smallest of its 0.1 mmol/L group
+  (2.6 → 46, 8.3 → 149, 5.0 → 90); an unchanged row keeps its stored mg/dL; a row added by "Pridėti laiką" copies the
+  source row's stored value. The editor shows the mg/dL next to each value.
+- **Trio in mmol/L refuses** (`set_isf`) any sensitivity that is not the smallest mg/dL of its 0.1 mmol/L group. When
+  Trio's Nightscout profile is in mmol/L, the editor snaps such values on save and the activation snaps what it sends
+  (also a profile made in mg/dL app mode with 47), each with "HH:MM: 47 → bus siunčiama 46 mg/dL — Trio mmol/L
+  redaktoriaus reikšmė."; the Nightscout form (hash, ✓) is unchanged. A refused value is never sent.
 - "Išsaugoti dabartinį kaip…" and "Ankstesnis" from an mmol/L Nightscout profile rebuild mg/dL with the same rule;
-  Nightscout then shows it exactly as now, Trio's stored mg/dL may differ by 1 — the screen says so.
+  Nightscout then shows it exactly as now, Trio's stored mg/dL may differ by 1. Nightscout values that are not exact
+  in their unit (CR not a whole 0.1 g/U, ISF not a whole mg/dL / 0.1 mmol/L) are rounded and also marked
+  reconstructed. The screen, the save message and the confirmation say so.
+- Rows, directions and the > 20 % warning are computed on Nightscout-form integers (Trio's slots vs the profile's
+  slots in the same units) and decided without rounding: |new − now| × 100 > 20 × now (CR 4.9 → 3.9, −20.4 %, warns;
+  exactly 20 % does not); the unit shown is applied only to the text. A change smaller than one step of the shown
+  unit reads "≈". With Trio in mmol/L and equal mmol/L rows whose mg/dL may differ: "≈ (±1 mg/dL)".
 - Confirmation text, expected hash and the "Ankstesnis" source come from a re-read at "Aktyvuoti" (warns when the
   schedule changed since the screen opened); "Kartoti" re-sends the identical command, no new backup.
 - Units of the screen are taken when a sheet opens (an open editor or activation does not switch units).
@@ -147,8 +157,11 @@ mg/dL, nothing written to the pump (no pump restriction). Basal code is untouche
   telefono."; the "dabar (nuskaityta HH:MM)" column and "Gauta iš NS" are this phone's clock (when it was read).
 
 **Tests.** `Tests/TherapyProfileTests.swift`: all contract hash vectors (CR1–CR4 incl. split and wrap, ISF1/ISF2 in
-both forms, from entries and from Nightscout doubles), asMmolL and mmol→mg/dL vectors plus the round trip for
-0.5–30.0, half-up rounding, validation mirror, editor parsing and draft (unchanged mmol text keeps mg/dL), Nightscout
+both forms, from entries and from Nightscout doubles), asMmolL and the revised mmol→mg/dL vectors (smallest: 0.5→9 … 2.6→46, 8.3→149 … 30.0→540,
+296 groups) plus the round trip for 0.5–30.0, snapping for Trio in mmol/L (47 → 46 with a note, hash unchanged),
+the > 20 % rule in integers (CR 4.9 → 3.9 warns, 20 % does not, ISF 98 → 77 with the app in mmol/L), "≈ (±1 mg/dL)",
+inexact Nightscout values, `ActiveTherapySnapshot.current` after `ProfileManager.loadProfile` (mmol/L and mg/dL
+stores, `TherapyProfileManagerTests`), half-up rounding, validation mirror, editor parsing and draft (unchanged mmol text keeps mg/dL), Nightscout
 profile decoding (mmol and mg/dL), off-grid refusal and 15-min Unknown, direction words and the > 20 % warning,
 encoding of both commands (other commands omit the new keys, alert texts), whole APNS body < 4 KB with 48 entries
 and a 30-character name (CR and ISF), storage round trip and upsert, active marker (incl. ISF units). ISF 90 mg/dL end
@@ -178,7 +191,7 @@ target of the shared `LoopFollow` scheme on an iPhone 17 / iOS 26.2 simulator, u
 | LoopFollow → Trio (branch `feat/basal-profiles`, not on main yet) | `command_type: "set_basal_schedule"` with `basal_schedule` = `[{"start":"HH:00","rate":<U/h>}]` (adjacent equal hours merged), `basal_schedule_name`, `expected_active_hash` = hash of Nightscout `store.default.basal` (48 half-hour values, independent of how the schedule is split; Trio CUSTOMIZATIONS.md §7 algorithm and vectors V1–V5, tested on both sides). Sending the schedule that is already active gets "Already active" from Trio, however either side splits it. Trio accepts it only with a Dana; its result arrives only as the push notification. |
 | Nightscout → LoopFollow (basal) | Profile `store.default.basal` (`ProfileManager.basalSchedule`) = Trio's active schedule; used for ✓, comparison, "Ankstesnis" and the expected hash. |
 | LoopFollow → Trio (branch `feat/cr-isf-profiles`, not on main yet) | `command_type: "set_carb_ratios"` with `carb_ratio_schedule` = `[{"start":"HH:MM","ratio":<g/U>}]` (1.0–50.0, step 0.1; 1–48 entries, first 00:00, 30-min starts, strictly increasing; adjacent equal values merged), `schedule_name` (1–30 chars, no quotes/control chars), `expected_active_hash` = CR hash (`"cr;"` + 48 × ratio×10) of Nightscout `store.default.carbratio`. Result only as Trio's push ("Carb ratios activated: X" / "Already active: X" / error), not parsed. |
-| LoopFollow → Trio (branch `feat/cr-isf-profiles`, not on main yet) | `command_type: "set_isf"` with `isf_schedule` = `[{"start":"HH:MM","sensitivity":<integer mg/dL 9–540>}]`, `schedule_name`, `expected_active_hash` = ISF Nightscout-form hash of `store.default.sens` (`"isf-mgdl;"` + 48 mg/dL, or `"isf-mmol;"` + 48 × value×10 when Trio uploads in mmol/L). Vectors in both repos' tests. |
+| LoopFollow → Trio (branch `feat/cr-isf-profiles`, not on main yet) | `command_type: "set_isf"` with `isf_schedule` = `[{"start":"HH:MM","sensitivity":<integer mg/dL 9–540>}]` (with Trio in mmol/L only the smallest mg/dL of each 0.1 mmol/L group — Trio refuses others; LoopFollow snaps before sending; mmol/L → mg/dL = that smallest value), `schedule_name`, `expected_active_hash` = ISF Nightscout-form hash of `store.default.sens` (`"isf-mgdl;"` + 48 mg/dL, or `"isf-mmol;"` + 48 × value×10 when Trio uploads in mmol/L). Vectors in both repos' tests. |
 | Nightscout → LoopFollow (CR/ISF) | Profile `store.default.carbratio`, `store.default.sens` and `units` ("mg/dl" / "mmol", as Trio `uploadProfiles` writes them; sens = `asMmolL` in mmol/L) = Trio's active schedules; used for ✓, comparison, "Ankstesnis" and the expected hashes. |
 
 If any of these contracts changes, `vidasrimkus/Trio` and `t1d-monitor` must change too.

@@ -73,7 +73,7 @@ struct TherapyProfileTests {
         #expect(TherapyProfileMath.mmolTenths(mgdl: 150) == 83) // 8.325 → 8.3
         #expect(TherapyProfileMath.mmolTenths(mgdl: 200) == 111)
         #expect(TherapyProfileMath.mmolTenths(mgdl: 46) == 26 && TherapyProfileMath.mmolTenths(mgdl: 47) == 26)
-        let vectors: [(Int, Int)] = [(26, 47), (100, 180), (83, 150), (111, 200), (5, 9), (25, 45), (300, 540)]
+        let vectors: [(Int, Int)] = [(5, 9), (6, 10), (22, 39), (25, 45), (26, 46), (50, 90), (83, 149), (100, 180), (111, 200), (300, 540)]
         for (tenths, mgdl) in vectors {
             #expect(TherapyProfileMath.mgdl(fromMmolTenths: tenths) == mgdl)
         }
@@ -84,6 +84,85 @@ struct TherapyProfileTests {
             #expect(mgdl != nil)
             #expect(mgdl.map(TherapyProfileMath.mmolTenths(mgdl:)) == tenths)
         }
+        #expect(Set(TherapyProfileMath.isfMgdlRange.map(TherapyProfileMath.mmolTenths(mgdl:))).count == 296)
+        // Trio's mmol/L editor value: the smallest of each group.
+        #expect(TherapyProfileMath.trioMmolEditorValue(mgdl: 47) == 46)
+        #expect(TherapyProfileMath.trioMmolEditorValue(mgdl: 150) == 149)
+        #expect(TherapyProfileMath.trioMmolEditorValue(mgdl: 149) == 149)
+        #expect(TherapyProfileMath.trioMmolEditorValue(mgdl: 90) == 90)
+        for m in TherapyProfileMath.isfMgdlRange {
+            let snapped = TherapyProfileMath.trioMmolEditorValue(mgdl: m)
+            #expect(snapped <= m && TherapyProfileMath.mmolTenths(mgdl: snapped) == TherapyProfileMath.mmolTenths(mgdl: m))
+        }
+    }
+
+    // MARK: > 20 % warning (integers, Nightscout form)
+
+    @Test("> 20 % decided in integers: CR 4.9 → 3.9 (−20.4 %) warns, exactly 20 % does not; ISF 98 → 77 mg/dL warns with the app in mmol/L")
+    func thresholdInIntegers() {
+        #expect(TherapyProfileMath.exceeds(now: 49, new: 39))
+        #expect(!TherapyProfileMath.exceeds(now: 50, new: 40))
+        #expect(!TherapyProfileMath.exceeds(now: 100, new: 120))
+        #expect(TherapyProfileMath.exceeds(now: 100, new: 121))
+        #expect(TherapyProfileMath.percentChange(now: 49, new: 39) == -20) // display only rounds to 20
+
+        let cr = TherapyProfile(kind: .carbRatio, name: "C", entries: e([("00:00", 39)]))
+        let crActive = ActiveTherapySnapshot(kind: .carbRatio, entries: [(0, 4.9)], nsMgdl: true, loadedAt: 0)
+        let crRows = TherapyChange.rows(profile: cr, active: crActive)
+        let crWarning = TherapyChange.bigChangeWarning(crRows, kind: .carbRatio)
+        #expect(crWarning?.contains("-20.4 %") == true && crWarning?.contains("daugiau insulino") == true)
+        let cr20 = TherapyChange.rows(profile: TherapyProfile(kind: .carbRatio, name: "C", entries: e([("00:00", 40)])),
+                                      active: ActiveTherapySnapshot(kind: .carbRatio, entries: [(0, 5.0)], nsMgdl: true, loadedAt: 0))
+        #expect(TherapyChange.bigChangeWarning(cr20, kind: .carbRatio) == nil)
+
+        // ISF 98 → 77 mg/dL; app in mmol/L. Trio in mg/dL: rows are mg/dL integers.
+        let isf = TherapyProfile(kind: .isf, name: "I", entries: e([("00:00", 77)]))
+        let isfMgdl = ActiveTherapySnapshot(kind: .isf, entries: [(0, 98)], nsMgdl: true, loadedAt: 0)
+        let rows = TherapyChange.rows(profile: isf, active: isfMgdl)
+        #expect(rows.first?.now == 98 && rows.first?.new == 77)
+        #expect(TherapyChange.bigChangeWarning(rows, kind: .isf)?.contains("daugiau insulino") == true)
+        #expect(TherapyChange.shown(98, kind: .isf, nsMgdl: true, mmol: true) == "5.4")
+        #expect(TherapyChange.shown(77, kind: .isf, nsMgdl: true, mmol: true) == "4.3")
+        #expect(TherapyChange.deltaText(rows[0], kind: .isf, nsMgdl: true, mmol: true) == "-1.1 (-21 %)")
+        // Trio in mmol/L: rows are tenths (5.4 → 4.3), still a warning.
+        let isfMmol = ActiveTherapySnapshot(kind: .isf, entries: [(0, 5.4)], nsMgdl: false, loadedAt: 0)
+        let mmolRows = TherapyChange.rows(profile: isf, active: isfMmol)
+        #expect(mmolRows.first?.now == 54 && mmolRows.first?.new == 43)
+        #expect(TherapyChange.bigChangeWarning(mmolRows, kind: .isf) != nil)
+        // 100 → 101 mg/dL shown in mmol/L is the same 5.6: "≈".
+        let tiny = TherapyChange.rows(profile: TherapyProfile(kind: .isf, name: "T", entries: e([("00:00", 101)])),
+                                      active: ActiveTherapySnapshot(kind: .isf, entries: [(0, 100)], nsMgdl: true, loadedAt: 0))
+        #expect(TherapyChange.deltaText(tiny[0], kind: .isf, nsMgdl: true, mmol: true).hasPrefix("≈"))
+    }
+
+    @Test("Trio in mmol/L: rows equal in mmol/L but mg/dL may differ → \"≈ (±1 mg/dL)\" instead of \"Reikšmės nesikeičia\"")
+    func approximateEquality() {
+        let active = ActiveTherapySnapshot(kind: .isf, entries: [(0, 2.6)], nsMgdl: false, loadedAt: 0)
+        let p47 = TherapyProfile(kind: .isf, name: "47", entries: e([("00:00", 47)]))
+        let p46 = TherapyProfile(kind: .isf, name: "46", entries: e([("00:00", 46)]))
+        #expect(TherapyChange.isApproximate(profile: p47, active: active))
+        #expect(!TherapyChange.isApproximate(profile: p46, active: active))
+        let rows47 = TherapyChange.rows(profile: p47, active: active)
+        #expect(TherapyChange.directionLines(rows47, kind: .isf, approximate: true).first?.hasPrefix("≈ (±1 mg/dL)") == true)
+        #expect(TherapyChange.directionLines(TherapyChange.rows(profile: p46, active: active), kind: .isf) == ["Reikšmės nesikeičia."])
+        // Trio in mg/dL is exact: never approximate.
+        #expect(!TherapyChange.isApproximate(profile: p47, active: ActiveTherapySnapshot(kind: .isf, entries: [(0, 46)], nsMgdl: true, loadedAt: 0)))
+    }
+
+    @Test("Nightscout values not exact in their unit mark the saved copy reconstructed, with a note")
+    func inexactNightscoutValues() {
+        let crExact = ActiveTherapySnapshot(kind: .carbRatio, entries: [(0, 8.5)], nsMgdl: true, loadedAt: 0)
+        let crRounded = ActiveTherapySnapshot(kind: .carbRatio, entries: [(0, 8.25)], nsMgdl: true, loadedAt: 0)
+        #expect(crExact.isExact && !crExact.isReconstructed && crExact.reconstructionNote == nil)
+        #expect(!crRounded.isExact && crRounded.isReconstructed)
+        #expect(crRounded.storedEntries == e([("00:00", 83)]))
+        #expect(crRounded.reconstructionNote?.contains("suapvalinta") == true)
+        let isfRounded = ActiveTherapySnapshot(kind: .isf, entries: [(0, 150.5)], nsMgdl: true, loadedAt: 0)
+        #expect(!isfRounded.isExact && isfRounded.isReconstructed)
+        let isfMmol = ActiveTherapySnapshot(kind: .isf, entries: [(0, 8.3)], nsMgdl: false, loadedAt: 0)
+        #expect(isfMmol.isExact && isfMmol.isReconstructed && isfMmol.reconstructionNote?.contains("mmol/L") == true)
+        #expect(isfMmol.trioMmol == true && crExact.trioMmol == false)
+        #expect(ActiveTherapySnapshot(kind: .isf, entries: [], nsMgdl: false, loadedAt: nil).trioMmol == nil)
     }
 
     @Test("Nightscout values rounded half-up from the decimal text of the number")
@@ -136,8 +215,8 @@ struct TherapyProfileTests {
         #expect((try? TherapyProfileMath.parse("", kind: .carbRatio, mmol: false).get()) == nil)
         #expect(TherapyProfileMath.parse("150", kind: .isf, mmol: false) == .success(150))
         #expect((try? TherapyProfileMath.parse("150.5", kind: .isf, mmol: false).get()) == nil)
-        #expect(TherapyProfileMath.parse("2.6", kind: .isf, mmol: true) == .success(47))
-        #expect(TherapyProfileMath.parse("8.3", kind: .isf, mmol: true) == .success(150))
+        #expect(TherapyProfileMath.parse("2.6", kind: .isf, mmol: true) == .success(46))
+        #expect(TherapyProfileMath.parse("8.3", kind: .isf, mmol: true) == .success(149))
         #expect(TherapyProfileMath.parse("30.0", kind: .isf, mmol: true) == .success(540))
         #expect((try? TherapyProfileMath.parse("30.1", kind: .isf, mmol: true).get()) == nil)
         #expect((try? TherapyProfileMath.parse("8.35", kind: .isf, mmol: true).get()) == nil)
@@ -148,9 +227,28 @@ struct TherapyProfileTests {
         let p = TherapyProfile(kind: .isf, name: "ISF2", entries: isf2)
         var draft = TherapyProfileDraft(p, mmol: true)
         #expect(draft.rows.map(\.text) == ["2.6", "2.6"])
-        #expect(draft.parsed().entries == isf2) // 46 stays 46
-        draft.rows[0].text = "2.6 " // retyped
-        #expect(draft.parsed().entries.first?.value == 47)
+        #expect(draft.parsed().entries == isf2) // Trio in mg/dL: 46 and 47 stay as stored
+        #expect(draft.parsed().notes.isEmpty)
+        draft.rows[1].text = "2.6 " // retyped → the smallest of the 2.6 group
+        #expect(draft.parsed().entries.map(\.value) == [46, 46])
+
+        // Trio in mmol/L: 47 is not a value Trio's mmol/L editor keeps → snapped to 46, with a note; never sent as 47.
+        let snapped = TherapyProfileDraft(p, mmol: false, trioMmol: true).parsed()
+        #expect(snapped.entries.map(\.value) == [46, 46])
+        #expect(snapped.notes == ["12:30: 47 → bus siunčiama 46 mg/dL — Trio mmol/L redaktoriaus reikšmė."])
+        let sendable = TherapyChange.sendable(p, trioMmol: true)
+        #expect(sendable.profile.entries.map(\.value) == [46, 46] && sendable.notes.count == 1)
+        #expect(TherapyProfileMath.isfSchedule(sendable.profile.entries).map(\.sensitivity) == [46])
+        #expect(TherapyChange.sendable(p, trioMmol: false).profile.entries == isf2)
+        #expect(TherapyChange.sendable(TherapyProfile(kind: .carbRatio, name: "C", entries: cr1), trioMmol: true).notes.isEmpty)
+        // Same Nightscout form, so the hash (and the ✓) are unchanged by snapping.
+        #expect(TherapyProfileMath.nightscoutFormHash(sendable.profile.entries, kind: .isf, nsMgdl: false) == "39a70ffcfeb762f2")
+
+        // A row added by "Pridėti laiką" copies text, original text and stored value from its source row.
+        var added = TherapyProfileDraft(TherapyProfile(kind: .isf, name: "A", entries: e([("00:00", 47)])), mmol: true)
+        let source = added.rows[0]
+        added.rows.append(TherapyDraftRow(minutes: 60, text: source.text, originalText: source.text, originalValue: added.value(of: source)))
+        #expect(added.parsed().entries.map(\.value) == [47, 47])
         let wrapped = TherapyProfileDraft(TherapyProfile(kind: .carbRatio, name: "W", entries: e([("06:00", 80), ("21:00", 120)])), mmol: false)
         #expect(wrapped.rows.first?.minutes == 0 && wrapped.rows.first?.text == "12.0")
         #expect(wrapped.parsed().problems.isEmpty)
@@ -187,7 +285,7 @@ struct TherapyProfileTests {
         #expect(cr.hash == "d0f731e0166dbc52")
         #expect(!isf.nsMgdl && isf.isReconstructed)
         #expect(isf.hash == "2d0d147868c7adf5")
-        #expect(isf.storedEntries == isf1) // 10.0/8.3/11.1 → 180/150/200
+        #expect(isf.storedEntries == e([("00:00", 180), ("08:00", 149), ("22:00", 200)])) // smallest of each group
         #expect(cr.storedEntries == cr1)
         #expect(isf.displaySlots(mmol: true)?.first == 100)
         #expect(isf.displaySlots(mmol: false)?.first == 180)
@@ -235,7 +333,7 @@ struct TherapyProfileTests {
         let rows = TherapyProfileMath.comparisonRows(now: now, new: lower)
         #expect(rows.map(\.minutes) == [0, 360])
         let warning = TherapyChange.bigChangeWarning(rows, kind: .carbRatio)
-        #expect(warning?.contains("-25 %") == true && warning?.contains("daugiau insulino") == true)
+        #expect(warning?.contains("-25.0 %") == true && warning?.contains("daugiau insulino") == true)
         #expect(TherapyChange.directionLines(rows, kind: .carbRatio).first?.contains("Daugiau insulino (mažesnis CR): 06:00") == true)
 
         let higher = TherapyProfileMath.slots(e([("00:00", 100), ("06:00", 125)]))
@@ -245,7 +343,7 @@ struct TherapyProfileTests {
 
         let small = TherapyProfileMath.comparisonRows(now: now, new: TherapyProfileMath.slots(e([("00:00", 120)])))
         #expect(TherapyChange.bigChangeWarning(small, kind: .carbRatio) == nil) // exactly 20 % is not "more than"
-        #expect(TherapyChange.deltaText(small[0], kind: .carbRatio, mmol: false) == "+2.0 (+20 %)")
+        #expect(TherapyChange.deltaText(small[0], kind: .carbRatio, nsMgdl: true, mmol: false) == "+2.0 (+20 %)")
         #expect(TherapyProfileMath.comparisonRows(now: nil, new: now).count == 1)
         #expect(TherapyChange.directionLines(TherapyProfileMath.comparisonRows(now: now, new: now), kind: .isf) == ["Reikšmės nesikeičia."])
     }
@@ -492,5 +590,67 @@ struct TherapyTimeZoneTests {
         #expect(results.count == Self.zones.count)
         #expect(results.allSatisfy { $0 == results[0] })
         #expect(results[0].last == "07:30")
+    }
+}
+
+/// `ActiveTherapySnapshot.current` reads what the app really keeps: `ProfileManager.shared` after `loadProfile(from:)`.
+/// Serialized; the Storage values `loadProfile` writes and the ProfileManager state are restored afterwards.
+@Suite(.serialized)
+struct TherapyProfileManagerTests {
+    private func profile(units: String, sens: String) throws -> NSProfile {
+        let json = """
+        {"defaultProfile":"default","units":"\(units)","store":{"default":{
+          "units":"\(units)","timezone":"Europe/Vilnius",
+          "basal":[{"time":"00:00","value":0.5,"timeAsSeconds":0}],
+          "carbratio":[{"time":"00:00","value":10,"timeAsSeconds":0},{"time":"06:00","value":8.5,"timeAsSeconds":21600},
+                       {"time":"11:00","value":12,"timeAsSeconds":39600},{"time":"17:00","value":10.5,"timeAsSeconds":61200}],
+          "sens":\(sens)}}}
+        """
+        return try JSONDecoder().decode(NSProfile.self, from: Data(json.utf8))
+    }
+
+    private func withLoadedProfile(_ nsProfile: NSProfile, _ body: () throws -> Void) rethrows {
+        let storage = Storage.shared
+        let saved = (storage.deviceToken.value, storage.expirationDate.value, storage.bundleId.value,
+                     storage.productionEnvironment.value, storage.teamId.value)
+        defer {
+            storage.deviceToken.value = saved.0
+            storage.expirationDate.value = saved.1
+            storage.bundleId.value = saved.2
+            storage.productionEnvironment.value = saved.3
+            storage.teamId.value = saved.4
+            ProfileManager.shared.clear()
+        }
+        ProfileManager.shared.loadProfile(from: nsProfile)
+        try body()
+    }
+
+    @Test("ProfileManager with a mmol/L store: current(.isf) gives the ISF1 mmol/L hash, current(.carbRatio) CR1")
+    func mmolStore() throws {
+        let ns = try profile(units: "mmol", sens: """
+        [{"time":"00:00","value":10,"timeAsSeconds":0},{"time":"08:00","value":8.3,"timeAsSeconds":28800},
+         {"time":"22:00","value":11.1,"timeAsSeconds":79200}]
+        """)
+        withLoadedProfile(ns) {
+            let isf = ActiveTherapySnapshot.current(.isf)
+            #expect(!isf.nsMgdl && isf.trioMmol == true)
+            #expect(isf.hash == "2d0d147868c7adf5")
+            #expect(isf.slots?.first == 100)
+            #expect(ActiveTherapySnapshot.current(.carbRatio).hash == "d0f731e0166dbc52")
+        }
+    }
+
+    @Test("ProfileManager with a mg/dL store: current(.isf) gives the ISF2 mg/dL hash")
+    func mgdlStore() throws {
+        let ns = try profile(units: "mg/dl", sens: """
+        [{"time":"00:00","value":46,"timeAsSeconds":0},{"time":"12:30","value":47,"timeAsSeconds":45000}]
+        """)
+        withLoadedProfile(ns) {
+            let isf = ActiveTherapySnapshot.current(.isf)
+            #expect(isf.nsMgdl && isf.trioMmol == false)
+            #expect(isf.hash == "4701d2c3453569ad")
+            #expect(isf.storedEntries == [TherapyEntry(minutes: 0, value: 46), TherapyEntry(minutes: 750, value: 47)])
+            #expect(ActiveTherapySnapshot.current(.carbRatio).hash == "d0f731e0166dbc52")
+        }
     }
 }

@@ -170,12 +170,31 @@ enum TherapyProfileMath {
         (mgdl * 555 + 500) / 1000
     }
 
-    /// mmol/L (tenths) → mg/dL: among 9…540 with `asMmolL(m) == x`, the one nearest x / 0.0555, tie → smaller;
-    /// nil when none.
+    /// mmol/L (tenths) → mg/dL (contract, revised): the SMALLEST m in 9…540 with `asMmolL(m) == x` — the value Trio's
+    /// own mmol/L ISF editor stores (DecimalPickerSettings.swift:22-28); nil when none.
     static func mgdl(fromMmolTenths tenths: Int) -> Int? {
-        isfMgdlRange
-            .filter { mmolTenths(mgdl: $0) == tenths }
-            .min { abs($0 * 555 - tenths * 1000) < abs($1 * 555 - tenths * 1000) }
+        isfMgdlRange.first { mmolTenths(mgdl: $0) == tenths }
+    }
+
+    /// The mg/dL Trio's mmol/L ISF editor would keep for `mgdl`: the smallest of its 0.1 mmol/L group. When Trio runs in
+    /// mmol/L, `set_isf` refuses any other value.
+    static func trioMmolEditorValue(mgdl: Int) -> Int {
+        mgdl(fromMmolTenths: mmolTenths(mgdl: mgdl)) ?? mgdl
+    }
+
+    /// Entries as they may be sent: with Trio in mmol/L every ISF value is snapped to the smallest mg/dL of its
+    /// 0.1 mmol/L group (same Nightscout form, so the hash and the ✓ do not change), with a note per changed entry.
+    static func snappedForTrio(_ entries: [TherapyEntry], kind: TherapyKind, trioMmol: Bool) -> (entries: [TherapyEntry], notes: [String]) {
+        guard kind == .isf, trioMmol else { return (entries, []) }
+        var notes: [String] = []
+        let snapped = entries.map { entry -> TherapyEntry in
+            let value = trioMmolEditorValue(mgdl: entry.value)
+            if value != entry.value {
+                notes.append("\(clock(entry.minutes)): \(entry.value) → bus siunčiama \(value) mg/dL — Trio mmol/L redaktoriaus reikšmė.")
+            }
+            return TherapyEntry(minutes: entry.minutes, value: value)
+        }
+        return (snapped, notes)
     }
 
     /// Round half-up of `value × scale` computed in decimal from the shortest text of the Double (so 1.15 is 1.15,
@@ -206,8 +225,8 @@ enum TherapyProfileMath {
 
     /// Stored-unit entries from Nightscout's schedule, for "Išsaugoti dabartinį kaip…" and "Ankstesnis". nil when a
     /// start is off the 30-minute grid, the schedule does not start at 00:00, or a value is out of range. ISF shown
-    /// in mmol/L is turned back into mg/dL with `mgdl(fromMmolTenths:)` — it shows on Nightscout exactly as now, but
-    /// Trio's stored mg/dL can differ by 1 (`reconstructed`).
+    /// in mmol/L is turned back into mg/dL with `mgdl(fromMmolTenths:)` (the smallest of its group, what Trio's mmol/L
+    /// editor stores) — it shows on Nightscout exactly as now, but Trio's stored mg/dL can differ by 1.
     static func storedEntries(fromNightscout entries: [(seconds: Int, value: Double)], kind: TherapyKind, nsMgdl: Bool) -> [TherapyEntry]? {
         let sorted = entries.sorted { $0.seconds < $1.seconds }
         guard let first = sorted.first, first.seconds == 0,
@@ -224,6 +243,19 @@ enum TherapyProfileMath {
             result.append(TherapyEntry(minutes: entry.minutes, value: value))
         }
         return merged(result)
+    }
+
+    /// True when every Nightscout value is exact in the unit it is read in: CR a whole tenth of g/U, ISF a whole mg/dL
+    /// (mg/dL profile) or a whole tenth of mmol/L. Otherwise the saved copy is rounded (reconstructed).
+    static func nightscoutIsExact(_ entries: [(seconds: Int, value: Double)], kind: TherapyKind, nsMgdl: Bool) -> Bool {
+        let scale = kind == .isf && nsMgdl ? 1 : 10
+        return entries.allSatisfy { entry in
+            guard var scaled = Decimal(string: "\(entry.value)", locale: Locale(identifier: "en_US_POSIX")).map({ $0 * Decimal(scale) })
+            else { return false }
+            var rounded = Decimal()
+            NSDecimalRound(&rounded, &scaled, 0, .plain)
+            return rounded == scaled
+        }
     }
 
     // MARK: Entries
@@ -343,14 +375,24 @@ enum TherapyProfileMath {
         return rows
     }
 
-    /// Largest change above `threshold` percent: (start of the row, percent), or nil.
-    static func largestChange(_ rows: [ComparisonRow], above threshold: Int = 20) -> (minutes: Int, percent: Int)? {
-        rows.compactMap { row -> (minutes: Int, percent: Int)? in
-            guard let now = row.now, let pct = percentChange(now: now, new: row.new) else { return nil }
-            return (row.minutes, pct)
-        }
-        .filter { abs($0.percent) > threshold }
-        .max { abs($0.percent) < abs($1.percent) }
+    /// More than `threshold` percent, decided in integers (no rounding): |new − now| × 100 > threshold × now.
+    static func exceeds(now: Int, new: Int, threshold: Int = 20) -> Bool {
+        now > 0 && abs(new - now) * 100 > threshold * now
+    }
+
+    /// The largest change above `threshold` percent (rows in Nightscout form), or nil.
+    static func largestChange(_ rows: [ComparisonRow], above threshold: Int = 20) -> ComparisonRow? {
+        rows.filter { row in row.now.map { exceeds(now: $0, new: row.new, threshold: threshold) } ?? false }
+            .max { a, b in
+                // |Δa|/a.now < |Δb|/b.now, cross-multiplied (integers, no rounding)
+                abs(a.new - a.now!) * b.now! < abs(b.new - b.now!) * a.now!
+            }
+    }
+
+    /// Percent with one decimal for the warning ("-20.4"); display only.
+    static func percentText(now: Int, new: Int) -> String {
+        guard now != 0 else { return "" }
+        return String(format: "%+.1f", Double(new - now) / Double(now) * 100)
     }
 
     // MARK: Editor input
