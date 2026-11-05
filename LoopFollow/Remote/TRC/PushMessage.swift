@@ -43,6 +43,7 @@ struct EncryptedPushMessage: Encodable {
 struct CommandPayload: Encodable {
     var user: String
     var commandType: TRCCommandType
+    var commandID: UUID?
     var timestamp: TimeInterval
 
     var bolusAmount: Decimal?
@@ -90,6 +91,7 @@ struct CommandPayload: Encodable {
         case user
         case commandType = "command_type"
         case timestamp
+        case commandID = "command_id"
         case bolusAmount = "bolus_amount"
         case target
         case duration

@@ -433,6 +433,7 @@ struct TherapyProfilesView: View {
                 Text("Remote commands are currently only available for Trio.").foregroundColor(.secondary)
             }
             currentSection
+            RestorePreviousTherapyView(kind: kind)
             profilesSection
             Section {
                 Button("Naujas profilis") {
@@ -819,6 +820,8 @@ struct TherapyProfileActivationView: View {
     @State private var isSending = false
     @State private var result: String?
     @State private var lastSent: (profile: TherapyProfile, hash: String)?
+    @State private var statusNow = Date()
+    @ObservedObject private var commandStatus = TherapyCommandStatus.shared
     /// The profile exactly as it will be sent (ISF snapped for Trio in mmol/L), fixed at the "Aktyvuoti" tap.
     @State private var frozenProfile: TherapyProfile?
 
@@ -887,11 +890,12 @@ struct TherapyProfileActivationView: View {
             }
             Section {
                 Button("Aktyvuoti") { prepareConfirmation() }
-                    .disabled(isSending || !problems.isEmpty || active.hash == nil)
+                    .disabled(isSending || !problems.isEmpty || active.hash == nil || commandStatus.record(kind)?.isPending(now: statusNow) == true)
                 if lastSent != nil {
                     Button("Kartoti (siųsti tą patį)") { if let last = lastSent { send(last.profile, hash: last.hash) } }
                         .disabled(isSending)
                 }
+                TherapyCommandStatusView(kind: kind)
                 if let result { Text(result).foregroundColor(.secondary) }
             }
             if isSending { ProgressView("Siunčiama…") }
@@ -903,6 +907,7 @@ struct TherapyProfileActivationView: View {
         }
         .navigationTitle(profile.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { statusNow = $0 }
         .alert("Aktyvuoti \(kind.shortName) profilį", isPresented: $showConfirm) {
             Button("Aktyvuoti", role: .destructive) {
                 if let hash = frozenHash, let toSend = frozenProfile { activate(toSend, hash: hash) }
@@ -980,15 +985,15 @@ struct TherapyProfileActivationView: View {
 
     private func send(_ profile: TherapyProfile, hash: String) {
         isSending = true
+        let command: TRCCommandType = kind == .carbRatio ? .setCarbRatios : .setISF
+        // A manual retry is a new correlated request; Trio's already-active guard prevents another write.
+        let id = commandStatus.begin(kind: kind, command: command, profileID: profile.id)
         lastSent = (profile, hash)
-        pushNotificationManager.sendTherapySchedulePushNotification(profile: profile, expectedActiveHash: hash) { success, error in
+        pushNotificationManager.sendTherapySchedulePushNotification(profile: profile, expectedActiveHash: hash, commandID: id) { success, error in
             DispatchQueue.main.async {
                 isSending = false
-                let activeID = profile.kind.activeID
-                activeID.value = TherapyActiveMarker.afterActivation(sent: profile.id, success: success, current: activeID.value)
-                result = success
-                    ? RemoteCommandMessage.sent + " Jei Trio praneš klaidą (pvz. ciklas vyksta), spauskite „Kartoti“ — tas pats siuntimas saugus."
-                    : "Klaida: \(error ?? "nežinoma")"
+                commandStatus.sent(kind: kind, id: id, success: success, error: error)
+                result = nil
                 LogManager.shared.log(category: .apns, message: "sendTherapySchedulePushNotification \(success ? "succeeded" : "failed") for \(profile.kind.shortName) \(profile.name)")
             }
         }

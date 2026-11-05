@@ -213,3 +213,27 @@ and show the mode immediately. Rejected: the mode exists only in human-readable,
 machine field), the push is alert-only (no `content-available`), so a backgrounded or closed LoopFollow
 never receives it in code — fragile. The Trio push notification itself is the confirmation; the displayed
 mode comes from devicestatus.
+
+
+## 7. Remote therapy safety (branch `feat/therapy-safety`, not merged)
+
+Supersedes the CR/ISF notification-only result described above; dosing mode/basal remain unchanged.
+- Requires the matching Trio safety branch: strict exact ±20% per half-hour, verified on-phone raw snapshot,
+  `restore_previous_carb_ratios` / `restore_previous_isf`, and correlated return pushes.
+- Every therapy set/restore request carries a UUID `command_id`. HTTP 200 shows only “Išsiųsta”. Only the Trio
+  return push with matching latest UUID AND command type changes state to “Trio pritaikė” or “Trio atmetė: reason”.
+  A late HTTP completion cannot overwrite the device's result. Unrelated, old and duplicate replies are ignored.
+- Latest operation per CR/ISF is persisted in UserDefaults. After five minutes without a reply, show
+  “Trio neatsakė – patikrink vaiko telefoną”; this is unknown, not failure/success. A late matching reply is shown.
+  Return pushes are processed on receive, foreground presentation and notification tap. iOS can withhold background
+  execution; after force-quit, tapping the actual result notification is needed to process it. No reply is inferred
+  from an APNS response or an approximately equal Nightscout hash.
+- Active profile ID is updated only after a matching successful Trio response; NS profile refresh is requested then.
+  The existing Nightscout match marker is still a comparison, not command execution proof.
+- “Grąžinti ankstesnį CR/ISF” in each profile list confirms before sending a restore command with expected hash.
+  No schedule is sent: Trio chooses its own exact snapshot. Its content cannot be previewed from this phone.
+  The older Nightscout-derived “Ankstesnis” profile remains a convenient saved copy, not the exact undo mechanism.
+- Commands with UUID are refused locally if return-notification credentials are absent. Transport acceptance,
+  device rejection (including time/old/new/% for the ±20% guard) and the five-minute unknown state are distinct.
+- Tests: `TherapyCommandStatusTests.sentVersusApplied`, `timeoutAndRelaunch`, `correlation`, `rejectedReason`,
+  `restoreEncoding`; existing APNS-size tests now include UUID overhead. No Telegram implementation here.

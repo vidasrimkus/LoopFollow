@@ -399,7 +399,7 @@ struct TherapyProfileTests {
 
     private func payload(kind: TherapyKind, entries: [TherapyEntry], name: String) -> CommandPayload {
         CommandPayload(
-            user: "LoopFollow", commandType: kind == .carbRatio ? .setCarbRatios : .setISF, timestamp: 1_790_424_000,
+            user: "LoopFollow", commandType: kind == .carbRatio ? .setCarbRatios : .setISF, commandID: UUID(), timestamp: 1_790_424_000,
             expectedActiveHash: "d0f731e0166dbc52",
             carbRatioSchedule: kind == .carbRatio ? TherapyProfileMath.carbRatioSchedule(entries) : nil,
             isfSchedule: kind == .isf ? TherapyProfileMath.isfSchedule(entries) : nil,
