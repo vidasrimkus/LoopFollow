@@ -179,7 +179,7 @@ enum TherapyProfileMath {
     /// The mg/dL Trio's mmol/L ISF editor would keep for `mgdl`: the smallest of its 0.1 mmol/L group. When Trio runs in
     /// mmol/L, `set_isf` refuses any other value.
     static func trioMmolEditorValue(mgdl: Int) -> Int {
-        mgdl(fromMmolTenths: mmolTenths(mgdl: mgdl)) ?? mgdl
+        Self.mgdl(fromMmolTenths: mmolTenths(mgdl: mgdl)) ?? mgdl
     }
 
     /// Entries as they may be sent: with Trio in mmol/L every ISF value is snapped to the smallest mg/dL of its
