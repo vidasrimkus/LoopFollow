@@ -237,3 +237,8 @@ Supersedes the CR/ISF notification-only result described above; dosing mode/basa
   device rejection (including time/old/new/% for the ±20% guard) and the five-minute unknown state are distinct.
 - Tests: `TherapyCommandStatusTests.sentVersusApplied`, `timeoutAndRelaunch`, `correlation`, `rejectedReason`,
   `restoreEncoding`; existing APNS-size tests now include UUID overhead. No Telegram implementation here.
+
+Correlated success also returns `active_hash` in the existing Nightscout form. LoopFollow uses it for exact-backup
+restore confirmation so an immediate undo does not wait for Nightscout profile upload. Trio still checks this
+hash against its current schedule; manual changes or unit switches can reject a stale confirmation. This is
+not the deferred exact remote hash protocol.

@@ -9,7 +9,7 @@ import Testing
 @Suite("Correlated Trio therapy results")
 struct TherapyCommandStatusTests {
     private func response(_ id: UUID, command: String = "set_carb_ratios", success: Bool = true, message: String = "done") -> [AnyHashable: Any] {
-        ["command_id": id.uuidString, "command_type": command, "command_status": success ? "success" : "failed", "aps": ["alert": ["body": message]]]
+        ["command_id": id.uuidString, "active_hash": "confirmed-hash", "command_type": command, "command_status": success ? "success" : "failed", "aps": ["alert": ["body": message]]]
     }
 
     @Test("HTTP 200 means sent only; a matching Trio response means applied") func sentVersusApplied() throws {
@@ -23,6 +23,7 @@ struct TherapyCommandStatusTests {
         #expect(tracker.record(.carbRatio)?.text(now: Date()).hasPrefix("Išsiųsta") == true)
         #expect(tracker.receive(response(id)) == .carbRatio)
         #expect(tracker.record(.carbRatio)?.phase == .applied)
+        #expect(tracker.record(.carbRatio)?.activeHash == "confirmed-hash")
         #expect(tracker.record(.carbRatio)?.text(now: Date()).hasPrefix("Trio pritaikė") == true)
         tracker.sent(kind: .carbRatio, id: id, success: false, error: "late HTTP error")
         #expect(tracker.record(.carbRatio)?.phase == .applied)

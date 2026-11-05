@@ -266,7 +266,7 @@ class PushNotificationManager {
     }
 
     private func sendEncryptedCommand(payload: CommandPayload, completion: @escaping (Bool, String?) -> Void) {
-        if payload.commandID != nil && payload.returnNotification == nil {
+        if payload.commandID != nil, payload.returnNotification == nil {
             completion(false, "Nenustatyti Trio atsakymo pranešimai. Patikrink LoopFollow grįžtamojo ryšio nustatymus.")
             return
         }

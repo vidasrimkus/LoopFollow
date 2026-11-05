@@ -19,6 +19,7 @@ final class TherapyCommandStatus: ObservableObject {
         let startedAt: Date
         var phase: Phase
         var message: String?
+        var activeHash: String?
 
         func isPending(now: Date) -> Bool {
             (phase == .sending || phase == .sent) && now.timeIntervalSince(startedAt) < 300
@@ -74,6 +75,7 @@ final class TherapyCommandStatus: ObservableObject {
             let alert = aps?["alert"] as? [String: Any]
             record.phase = status == "success" ? .applied : .rejected
             record.message = alert?["body"] as? String
+            record.activeHash = userInfo["active_hash"] as? String
             records[kind.rawValue] = record
             return kind
         }
@@ -114,7 +116,8 @@ struct RestorePreviousTherapyView: View {
         Section(header: Text("Atkūrimas Trio telefone")) {
             TimelineView(.periodic(from: .now, by: 10)) { context in
                 Button("Grąžinti ankstesnį \(kind.shortName)") {
-                    expectedHash = ActiveTherapySnapshot.current(kind).hash
+                    let last = status.record(kind)
+                    expectedHash = last?.phase == .applied ? (last?.activeHash ?? ActiveTherapySnapshot.current(kind).hash) : ActiveTherapySnapshot.current(kind).hash
                     if expectedHash == nil { error = "Pirma atnaujink Nightscout profilį." } else { showConfirmation = true }
                 }
                 .disabled(status.record(kind)?.isPending(now: context.date) == true)
