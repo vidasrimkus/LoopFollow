@@ -140,13 +140,52 @@ struct TherapyProfileTests {
         let active = ActiveTherapySnapshot(kind: .isf, entries: [(0, 2.6)], nsMgdl: false, loadedAt: 0)
         let p47 = TherapyProfile(kind: .isf, name: "47", entries: e([("00:00", 47)]))
         let p46 = TherapyProfile(kind: .isf, name: "46", entries: e([("00:00", 46)]))
+        // Nightscout in mmol/L: always approximate, even for the smallest value 46 (Trio may still hold 47).
         #expect(TherapyChange.isApproximate(profile: p47, active: active))
-        #expect(!TherapyChange.isApproximate(profile: p46, active: active))
-        let rows47 = TherapyChange.rows(profile: p47, active: active)
-        #expect(TherapyChange.directionLines(rows47, kind: .isf, approximate: true).first?.hasPrefix("≈ (±1 mg/dL)") == true)
-        #expect(TherapyChange.directionLines(TherapyChange.rows(profile: p46, active: active), kind: .isf) == ["Reikšmės nesikeičia."])
+        #expect(TherapyChange.isApproximate(profile: p46, active: active))
+        for p in [p46, p47] {
+            let lines = TherapyChange.directionLines(
+                TherapyChange.rows(profile: p, active: active), kind: .isf,
+                approximate: TherapyChange.isApproximate(profile: p, active: active)
+            )
+            #expect(lines == ["≈ (±1 mg/dL) — Trio gali saugoti kitą mg/dL tos pačios mmol/L grupės reikšmę."])
+            #expect(!lines.contains("Reikšmės nesikeičia."))
+        }
+        let p46mgdl = ActiveTherapySnapshot(kind: .isf, entries: [(0, 46)], nsMgdl: true, loadedAt: 0)
+        #expect(TherapyChange.directionLines(
+            TherapyChange.rows(profile: p46, active: p46mgdl), kind: .isf,
+            approximate: TherapyChange.isApproximate(profile: p46, active: p46mgdl)
+        ) == ["Reikšmės nesikeičia."])
         // Trio in mg/dL is exact: never approximate.
         #expect(!TherapyChange.isApproximate(profile: p47, active: ActiveTherapySnapshot(kind: .isf, entries: [(0, 46)], nsMgdl: true, loadedAt: 0)))
+    }
+
+    @Test("Import of a crafted ISF 10^15 does not crash and is skipped; mmolTenths is overflow-safe")
+    func importSkipsInvalid() throws {
+        let json = """
+        [{"id":"8A5E2A2C-0C55-4B47-9C0E-6B1C2B6F2E01","kind":"isf","name":"Bad","entries":[{"minutes":0,"value":1000000000000000}],
+          "createdAt":"2026-11-05T00:00:00Z","updatedAt":"2026-11-05T00:00:00Z"},
+         {"id":"8A5E2A2C-0C55-4B47-9C0E-6B1C2B6F2E02","kind":"isf","name":"Good","entries":[{"minutes":0,"value":90}],
+          "createdAt":"2026-11-05T00:00:00Z","updatedAt":"2026-11-05T00:00:00Z"},
+         {"id":"8A5E2A2C-0C55-4B47-9C0E-6B1C2B6F2E03","kind":"carbRatio","name":"CR","entries":[{"minutes":0,"value":100}],
+          "createdAt":"2026-11-05T00:00:00Z","updatedAt":"2026-11-05T00:00:00Z"}]
+        """
+        let imported = try BasalProfilesDocument.decoder.decode([TherapyProfile].self, from: Data(json.utf8))
+        let bad = try #require(imported.first)
+        // What the list screen computes for every row must not trap even for the crafted profile.
+        _ = TherapyProfileMath.nightscoutFormHash(bad.entries, kind: .isf, nsMgdl: false)
+        _ = TherapyProfileMath.displayValue(bad.entries[0].value, kind: .isf, mmol: true)
+        _ = TherapyProfileMath.trioMmolEditorValue(mgdl: bad.entries[0].value)
+        #expect(TherapyProfileMath.mmolTenths(mgdl: Int.max) == TherapyProfileMath.mmolTenths(mgdl: 100_000))
+        #expect(TherapyProfileMath.exceeds(now: 1, new: Int.max))
+        #expect(!TherapyProfileMath.validate(name: bad.name, kind: .isf, entries: bad.entries).isEmpty)
+
+        let result = TherapyProfileList.importing(imported, kind: .isf, into: [])
+        #expect(result.added == 1 && result.skipped == 1)
+        #expect(result.list.map(\.name) == ["Good"])
+        let again = TherapyProfileList.importing(imported, kind: .isf, into: result.list)
+        #expect(again.added == 0 && again.list.count == 1)
+        #expect(TherapyProfileList.importing(imported, kind: .carbRatio, into: []).added == 1)
     }
 
     @Test("Nightscout values not exact in their unit mark the saved copy reconstructed, with a note")

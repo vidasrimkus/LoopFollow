@@ -63,6 +63,26 @@ enum TherapyProfileList {
     static func profile(id: UUID, in list: [TherapyProfile]) -> TherapyProfile? {
         list.first { $0.id == id }
     }
+
+    /// Import: only profiles of `kind` that pass validation (the same rules Trio applies) are added; duplicates (same
+    /// id, or same name and entries) are left out. A crafted file (e.g. ISF 10^15) is skipped, never stored.
+    static func importing(_ imported: [TherapyProfile], kind: TherapyKind, into list: [TherapyProfile])
+        -> (list: [TherapyProfile], added: Int, skipped: Int)
+    {
+        var list = list
+        var added = 0
+        var skipped = 0
+        for p in imported where p.kind == kind {
+            guard TherapyProfileMath.validate(name: p.name, kind: kind, entries: p.entries).isEmpty else {
+                skipped += 1
+                continue
+            }
+            if list.contains(where: { $0.id == p.id || ($0.name == p.name && $0.entries == p.entries) }) { continue }
+            list.append(p)
+            added += 1
+        }
+        return (list, added, skipped)
+    }
 }
 
 /// Which saved profile is "the active one" — the same rules as `BasalActiveMarker`: identity from the stored active
@@ -166,8 +186,11 @@ enum TherapyProfileMath {
 
     /// Trio `asMmolL` = round(mg/dL × 0.0555, 1 decimal, half-up), returned in tenths. Exact integer arithmetic:
     /// mg/dL × 0.555 = mg/dL × 555 / 1000.
+    /// Input is clamped to 0…100 000 so a crafted value (an imported ISF of 10^15) cannot overflow and trap; such
+    /// values never pass validation and are never sent.
     static func mmolTenths(mgdl: Int) -> Int {
-        (mgdl * 555 + 500) / 1000
+        let m = min(max(mgdl, 0), 100_000)
+        return (m * 555 + 500) / 1000
     }
 
     /// mmol/L (tenths) → mg/dL (contract, revised): the SMALLEST m in 9…540 with `asMmolL(m) == x` — the value Trio's
@@ -376,16 +399,22 @@ enum TherapyProfileMath {
     }
 
     /// More than `threshold` percent, decided in integers (no rounding): |new − now| × 100 > threshold × now.
+    /// Overflow (only possible with out-of-range data) counts as exceeding.
     static func exceeds(now: Int, new: Int, threshold: Int = 20) -> Bool {
-        now > 0 && abs(new - now) * 100 > threshold * now
+        guard now > 0 else { return false }
+        let diff = new.subtractingReportingOverflow(now)
+        let lhs = diff.partialValue.magnitude.multipliedReportingOverflow(by: 100)
+        let rhs = threshold.multipliedReportingOverflow(by: now)
+        if diff.overflow || lhs.overflow || rhs.overflow { return true }
+        return lhs.partialValue > UInt(rhs.partialValue)
     }
 
     /// The largest change above `threshold` percent (rows in Nightscout form), or nil.
     static func largestChange(_ rows: [ComparisonRow], above threshold: Int = 20) -> ComparisonRow? {
         rows.filter { row in row.now.map { exceeds(now: $0, new: row.new, threshold: threshold) } ?? false }
             .max { a, b in
-                // |Δa|/a.now < |Δb|/b.now, cross-multiplied (integers, no rounding)
-                abs(a.new - a.now!) * b.now! < abs(b.new - b.now!) * a.now!
+                // Only orders rows that already exceed; the decision itself is `exceeds` (integers).
+                abs(Double(a.new) - Double(a.now!)) / Double(a.now!) < abs(Double(b.new) - Double(b.now!)) / Double(b.now!)
             }
     }
 

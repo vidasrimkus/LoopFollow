@@ -154,13 +154,10 @@ enum TherapyChange {
         )
     }
 
-    /// ISF with Trio in mmol/L: Nightscout shows the same 0.1 mmol/L, but the profile's mg/dL differ from the value
-    /// Trio's mmol/L editor would hold for some slot — equal on screen, not necessarily in mg/dL.
+    /// ISF with Nightscout in mmol/L: equal 0.1 mmol/L rows never prove equal mg/dL — Trio may hold a non-smallest
+    /// mg/dL of the group (e.g. 47, set before mmol/L mode) that this command rewrites to 46. Always approximate then.
     static func isApproximate(profile: TherapyProfile, active: ActiveTherapySnapshot) -> Bool {
-        guard profile.kind == .isf, !active.nsMgdl, let now = active.slots, now.count == TherapyProfileMath.slotCount else { return false }
-        return zip(TherapyProfileMath.slots(profile.entries), now).contains { mgdl, tenths in
-            TherapyProfileMath.mgdl(fromMmolTenths: tenths) != mgdl
-        }
+        profile.kind == .isf && !active.nsMgdl && active.slots != nil
     }
 
     /// "Daugiau insulino (mažesnis CR): 06:00, 11:00" / "Mažiau insulino (…)" — lower CR or ISF means MORE insulin.
@@ -178,7 +175,7 @@ enum TherapyChange {
         if !less.isEmpty { lines.append("⬇︎ Mažiau insulino (\(kind.higherMeans)): \(list(less))") }
         if more.isEmpty, less.isEmpty, rows.contains(where: { $0.now != nil }) {
             lines.append(approximate
-                ? "≈ (±1 mg/dL) — Nightscout rodo tas pačias mmol/L reikšmes, mg/dL gali skirtis."
+                ? "≈ (±1 mg/dL) — Trio gali saugoti kitą mg/dL tos pačios mmol/L grupės reikšmę."
                 : "Reikšmės nesikeičia.")
         }
         return lines
@@ -659,15 +656,10 @@ struct TherapyProfilesView: View {
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             let imported = try BasalProfilesDocument.decoder.decode([TherapyProfile].self, from: Data(contentsOf: url))
-                .filter { $0.kind == kind && !$0.entries.isEmpty }
-            var list = profiles.value
-            var added = 0
-            for p in imported where !list.contains(where: { $0.id == p.id || ($0.name == p.name && $0.entries == p.entries) }) {
-                list.append(p)
-                added += 1
-            }
-            profiles.value = list
-            message = "Importuota profilių: \(added)."
+            let result = TherapyProfileList.importing(imported, kind: kind, into: profiles.value)
+            profiles.value = result.list
+            message = "Importuota profilių: \(result.added)."
+                + (result.skipped > 0 ? " Praleista netinkamų: \(result.skipped)." : "")
         } catch {
             message = "Importas nepavyko: \(error.localizedDescription)"
         }
