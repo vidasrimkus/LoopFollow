@@ -109,7 +109,7 @@ deletable, active id switches after activation, hash mismatch removes ✓, initi
 Trio'je" shows the hash input (hash of displayed slots == Trio vectors V1–V6, rows/segments/total, 48 rows for V4,
 Unknown after 15 min, matching profile).
 
-## 2b. CR and ISF profiles → `set_carb_ratios` / `set_isf` (branch `feat/cr-isf-profiles`)
+## 2b. CR and ISF profiles → `set_carb_ratios` / `set_isf` (branch `feat/cr-isf-profiles`, merged to main in 1139053)
 
 **Purpose.** Keep named carb-ratio and ISF schedules on this phone (two separate lists, two screens) and activate one
 on Trio remotely. Contract agreed with vidasrimkus/Trio ("cr-isf"): 30-minute grid, ISF sent always as integer
@@ -190,8 +190,8 @@ target of the shared `LoopFollow` scheme on an iPhone 17 / iOS 26.2 simulator, u
 | Nightscout → LoopFollow | devicestatus `openaps.dosingMode` (same field t1d-monitor reads). |
 | LoopFollow → Trio (branch `feat/basal-profiles`, not on main yet) | `command_type: "set_basal_schedule"` with `basal_schedule` = `[{"start":"HH:00","rate":<U/h>}]` (adjacent equal hours merged), `basal_schedule_name`, `expected_active_hash` = hash of Nightscout `store.default.basal` (48 half-hour values, independent of how the schedule is split; Trio CUSTOMIZATIONS.md §7 algorithm and vectors V1–V5, tested on both sides). Sending the schedule that is already active gets "Already active" from Trio, however either side splits it. Trio accepts it only with a Dana; its result arrives only as the push notification. |
 | Nightscout → LoopFollow (basal) | Profile `store.default.basal` (`ProfileManager.basalSchedule`) = Trio's active schedule; used for ✓, comparison, "Ankstesnis" and the expected hash. |
-| LoopFollow → Trio (branch `feat/cr-isf-profiles`, not on main yet) | `command_type: "set_carb_ratios"` with `carb_ratio_schedule` = `[{"start":"HH:MM","ratio":<g/U>}]` (1.0–50.0, step 0.1; 1–48 entries, first 00:00, 30-min starts, strictly increasing; adjacent equal values merged), `schedule_name` (1–30 chars, no quotes/control chars), `expected_active_hash` = CR hash (`"cr;"` + 48 × ratio×10) of Nightscout `store.default.carbratio`. Result only as Trio's push ("Carb ratios activated: X" / "Already active: X" / error), not parsed. |
-| LoopFollow → Trio (branch `feat/cr-isf-profiles`, not on main yet) | `command_type: "set_isf"` with `isf_schedule` = `[{"start":"HH:MM","sensitivity":<integer mg/dL 9–540>}]` (with Trio in mmol/L only the smallest mg/dL of each 0.1 mmol/L group — Trio refuses others; LoopFollow snaps before sending; mmol/L → mg/dL = that smallest value), `schedule_name`, `expected_active_hash` = ISF Nightscout-form hash of `store.default.sens` (`"isf-mgdl;"` + 48 mg/dL, or `"isf-mmol;"` + 48 × value×10 when Trio uploads in mmol/L). Vectors in both repos' tests. |
+| LoopFollow → Trio (`feat/cr-isf-profiles` via `feat/therapy-safety`, merged to main in 1139053) | `command_type: "set_carb_ratios"` with `carb_ratio_schedule` = `[{"start":"HH:MM","ratio":<g/U>}]` (1.0–50.0, step 0.1; 1–48 entries, first 00:00, 30-min starts, strictly increasing; adjacent equal values merged), `schedule_name` (1–30 chars, no quotes/control chars), `expected_active_hash` = CR hash (`"cr;"` + 48 × ratio×10) of Nightscout `store.default.carbratio`. Result only as Trio's push ("Carb ratios activated: X" / "Already active: X" / error), not parsed. |
+| LoopFollow → Trio (`feat/cr-isf-profiles` via `feat/therapy-safety`, merged to main in 1139053) | `command_type: "set_isf"` with `isf_schedule` = `[{"start":"HH:MM","sensitivity":<integer mg/dL 9–540>}]` (with Trio in mmol/L only the smallest mg/dL of each 0.1 mmol/L group — Trio refuses others; LoopFollow snaps before sending; mmol/L → mg/dL = that smallest value), `schedule_name`, `expected_active_hash` = ISF Nightscout-form hash of `store.default.sens` (`"isf-mgdl;"` + 48 mg/dL, or `"isf-mmol;"` + 48 × value×10 when Trio uploads in mmol/L). Vectors in both repos' tests. |
 | Nightscout → LoopFollow (CR/ISF) | Profile `store.default.carbratio`, `store.default.sens` and `units` ("mg/dl" / "mmol", as Trio `uploadProfiles` writes them; sens = `asMmolL` in mmol/L) = Trio's active schedules; used for ✓, comparison, "Ankstesnis" and the expected hashes. |
 
 If any of these contracts changes, `vidasrimkus/Trio` and `t1d-monitor` must change too.
@@ -215,7 +215,7 @@ never receives it in code — fragile. The Trio push notification itself is the 
 mode comes from devicestatus.
 
 
-## 7. Remote therapy safety (branch `feat/therapy-safety`, not merged)
+## 7. Remote therapy safety (branch `feat/therapy-safety`, merged to main in 1139053)
 
 Supersedes the CR/ISF notification-only result described above; dosing mode/basal remain unchanged.
 - Requires the matching Trio safety branch: strict exact ±20% per half-hour, verified on-phone raw snapshot,
