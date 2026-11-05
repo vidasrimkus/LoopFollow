@@ -116,6 +116,37 @@ class PushNotificationManager {
         sendEncryptedCommand(payload: basalSchedulePayload(profile: profile, expectedActiveHash: expectedActiveHash), completion: completion)
     }
 
+    /// The set_carb_ratios / set_isf payload (also used by the size test).
+    func therapySchedulePayload(profile: TherapyProfile, expectedActiveHash: String, commandID: UUID? = nil) -> CommandPayload {
+        CommandPayload(
+            user: user,
+            commandType: profile.kind == .carbRatio ? .setCarbRatios : .setISF,
+            commandID: commandID,
+            timestamp: Date().timeIntervalSince1970,
+            expectedActiveHash: expectedActiveHash,
+            carbRatioSchedule: profile.kind == .carbRatio ? TherapyProfileMath.carbRatioSchedule(profile.entries) : nil,
+            isfSchedule: profile.kind == .isf ? TherapyProfileMath.isfSchedule(profile.entries) : nil,
+            scheduleName: profile.name.trimmingCharacters(in: .whitespaces),
+            returnNotification: createReturnNotificationInfo()
+        )
+    }
+
+    func sendTherapySchedulePushNotification(profile: TherapyProfile, expectedActiveHash: String, commandID: UUID? = nil, completion: @escaping (Bool, String?) -> Void) {
+        sendEncryptedCommand(payload: therapySchedulePayload(profile: profile, expectedActiveHash: expectedActiveHash, commandID: commandID), completion: completion)
+    }
+
+    func restoreTherapyPayload(kind: TherapyKind, expectedActiveHash: String, commandID: UUID) -> CommandPayload {
+        CommandPayload(
+            user: user, commandType: kind == .carbRatio ? .restorePreviousCarbRatios : .restorePreviousISF,
+            commandID: commandID, timestamp: Date().timeIntervalSince1970,
+            expectedActiveHash: expectedActiveHash, returnNotification: createReturnNotificationInfo()
+        )
+    }
+
+    func sendRestoreTherapyPushNotification(kind: TherapyKind, expectedActiveHash: String, commandID: UUID, completion: @escaping (Bool, String?) -> Void) {
+        sendEncryptedCommand(payload: restoreTherapyPayload(kind: kind, expectedActiveHash: expectedActiveHash, commandID: commandID), completion: completion)
+    }
+
     func sendBolusPushNotification(bolusAmount: HKQuantity, completion: @escaping (Bool, String?) -> Void) {
         let bolusAmountDecimal = Decimal(bolusAmount.doubleValue(for: .internationalUnit()))
         let payload = CommandPayload(
@@ -235,6 +266,10 @@ class PushNotificationManager {
     }
 
     private func sendEncryptedCommand(payload: CommandPayload, completion: @escaping (Bool, String?) -> Void) {
+        if payload.commandID != nil, payload.returnNotification == nil {
+            completion(false, "Nenustatyti Trio atsakymo pranešimai. Patikrink LoopFollow grįžtamojo ryšio nustatymus.")
+            return
+        }
         var missingFields = [String]()
         if sharedSecret.isEmpty { missingFields.append("sharedSecret") }
         if apnsKey.isEmpty { missingFields.append("apnsKey") }

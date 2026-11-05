@@ -135,6 +135,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let userInfoKeys = userInfo.keys.compactMap { $0 as? String }.sorted()
         LogManager.shared.log(category: .apns, message: "Received remote notification: keys=\(userInfoKeys)")
 
+        TherapyCommandStatus.handle(userInfo)
+
         // Check if this is a response notification from Loop or Trio
         if let aps = userInfo["aps"] as? [String: Any] {
             // Handle visible notification (alert, sound, badge)
@@ -183,6 +185,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func userNotificationCenter(_: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        TherapyCommandStatus.handle(response.notification.request.content.userInfo)
         if response.actionIdentifier == "OPEN_APP_ACTION" {
             // Dismiss any presented modal/sheet so the user actually sees Home
             UIApplication.shared.topMost?.dismiss(animated: true)
@@ -267,6 +270,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void)
     {
         let content = notification.request.content
+        TherapyCommandStatus.handle(content.userInfo)
         let userInfoKeys = content.userInfo.keys.compactMap { $0 as? String }.sorted()
         LogManager.shared.log(
             category: .general,

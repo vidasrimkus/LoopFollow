@@ -112,6 +112,11 @@ class Storage {
     var basalProfiles = StorageValue<[BasalProfile]>(key: "basalProfiles", defaultValue: [])
     /// The saved profile last activated (or saved from the active schedule); only it gets ✓ and cannot be deleted.
     var activeBasalProfileID = StorageValue<UUID?>(key: "activeBasalProfileID", defaultValue: nil)
+    /// Named carb ratio schedules (set_carb_ratios) and ISF schedules (set_isf), each with its active id. Only here.
+    var carbRatioProfiles = StorageValue<[TherapyProfile]>(key: "carbRatioProfiles", defaultValue: [])
+    var activeCarbRatioProfileID = StorageValue<UUID?>(key: "activeCarbRatioProfileID", defaultValue: nil)
+    var isfProfiles = StorageValue<[TherapyProfile]>(key: "isfProfiles", defaultValue: [])
+    var activeISFProfileID = StorageValue<UUID?>(key: "activeISFProfileID", defaultValue: nil)
     var iageInsertTime = StorageValue<TimeInterval>(key: "iageInsertTime", defaultValue: 0)
     var lastMinBgMgdl = StorageValue<Double?>(key: "lastMinBgMgdl", defaultValue: nil)
     var lastMaxBgMgdl = StorageValue<Double?>(key: "lastMaxBgMgdl", defaultValue: nil)

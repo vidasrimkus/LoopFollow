@@ -12,6 +12,10 @@ enum TRCCommandType: String, Encodable {
     case cancelOverride = "cancel_override"
     case setDosingMode = "set_dosing_mode"
     case setBasalSchedule = "set_basal_schedule"
+    case setCarbRatios = "set_carb_ratios"
+    case setISF = "set_isf"
+    case restorePreviousCarbRatios = "restore_previous_carb_ratios"
+    case restorePreviousISF = "restore_previous_isf"
 
     var displayName: String {
         switch self {
@@ -23,6 +27,10 @@ enum TRCCommandType: String, Encodable {
         case .cancelOverride: return "Cancel Override"
         case .setDosingMode: return "Dosing Mode"
         case .setBasalSchedule: return "Basal Schedule"
+        case .setCarbRatios: return "Carb Ratios"
+        case .setISF: return "ISF"
+        case .restorePreviousCarbRatios: return "Restore Previous Carb Ratios"
+        case .restorePreviousISF: return "Restore Previous ISF"
         }
     }
 }

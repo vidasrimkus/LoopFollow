@@ -157,7 +157,7 @@ struct CurrentBasalView: View {
                         Text("Neatitinka nė vieno išsaugoto profilio.").foregroundColor(.orange)
                     }
                 }
-                Section(header: Text("Laikas | U/h")) {
+                Section(header: Text("Laikas (Trio telefono laikas) | U/h")) {
                     ForEach(Array(BasalProfileMath.slotRows(slots).enumerated()), id: \.offset) { _, row in
                         HStack {
                             Text(row.start)
@@ -197,7 +197,7 @@ struct BasalProfilesView: View {
             if device.value != "Trio" {
                 Text("Remote commands are currently only available for Trio.").foregroundColor(.secondary)
             }
-            Section(header: Text("Dabar Trio'je")) {
+            Section(header: Text("Dabar Trio'je"), footer: Text("Laikai — Trio telefono laikas, ne šio telefono.")) {
                 if let slots = active.slots {
                     // Tap opens a read-only 24-row table; nothing is sent from there.
                     Button {
@@ -451,7 +451,10 @@ struct BasalProfileEditorView: View {
         NavigationView {
             Form {
                 Section(header: Text("Pavadinimas")) { TextField("Pavadinimas", text: nameBinding) }
-                Section(header: Text("Paros suma: \(BasalProfileFormat.rate(BasalProfileMath.dailyTotal(hourly))) U/d")) {
+                Section(
+                    header: Text("Paros suma: \(BasalProfileFormat.rate(BasalProfileMath.dailyTotal(hourly))) U/d"),
+                    footer: Text("Laikai — Trio telefono laikas, ne šio telefono.")
+                ) {
                     ForEach(0 ..< BasalProfileMath.hours, id: \.self) { hour in
                         HStack {
                             Text(String(format: "%02d:00", hour)).monospacedDigit()
@@ -522,7 +525,10 @@ struct BasalProfileActivationView: View {
                         .foregroundColor(.orange)
                 }
             }
-            Section(header: Text("Valanda | dabar (\(BasalProfileFormat.clock(capturedAt))) | naujas | Δ")) {
+            Section(
+                header: Text("Valanda (Trio telefono laikas) | dabar (nuskaityta \(BasalProfileFormat.clock(capturedAt))) | naujas | Δ"),
+                footer: Text("Laikai — Trio telefono laikas, ne šio telefono.")
+            ) {
                 ForEach(0 ..< BasalProfileMath.hours, id: \.self) { hour in
                     let now = current?[hour]
                     let new = profile.hourlyRates[hour]
