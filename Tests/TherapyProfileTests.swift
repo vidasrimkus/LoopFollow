@@ -483,9 +483,11 @@ struct TherapyTimeZoneTests {
         defer { NSTimeZone.default = saved }
         var results: [[String]] = []
         for id in Self.zones {
-            NSTimeZone.default = try #require(TimeZone(identifier: id))
-            #expect(NSTimeZone.default.identifier == id)
-            results.append(try signature())
+            let zone = try #require(TimeZone(identifier: id))
+            NSTimeZone.default = zone
+            // Compared as zones: TimeZone(identifier: "UTC") reports its identifier as "GMT".
+            #expect(NSTimeZone.default == zone, "default time zone not switched to \(id)")
+            try results.append(signature())
         }
         #expect(results.count == Self.zones.count)
         #expect(results.allSatisfy { $0 == results[0] })
