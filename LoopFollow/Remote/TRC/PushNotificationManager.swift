@@ -116,6 +116,24 @@ class PushNotificationManager {
         sendEncryptedCommand(payload: basalSchedulePayload(profile: profile, expectedActiveHash: expectedActiveHash), completion: completion)
     }
 
+    /// The set_carb_ratios / set_isf payload (also used by the size test).
+    func therapySchedulePayload(profile: TherapyProfile, expectedActiveHash: String) -> CommandPayload {
+        CommandPayload(
+            user: user,
+            commandType: profile.kind == .carbRatio ? .setCarbRatios : .setISF,
+            timestamp: Date().timeIntervalSince1970,
+            expectedActiveHash: expectedActiveHash,
+            carbRatioSchedule: profile.kind == .carbRatio ? TherapyProfileMath.carbRatioSchedule(profile.entries) : nil,
+            isfSchedule: profile.kind == .isf ? TherapyProfileMath.isfSchedule(profile.entries) : nil,
+            scheduleName: profile.name.trimmingCharacters(in: .whitespaces),
+            returnNotification: createReturnNotificationInfo()
+        )
+    }
+
+    func sendTherapySchedulePushNotification(profile: TherapyProfile, expectedActiveHash: String, completion: @escaping (Bool, String?) -> Void) {
+        sendEncryptedCommand(payload: therapySchedulePayload(profile: profile, expectedActiveHash: expectedActiveHash), completion: completion)
+    }
+
     func sendBolusPushNotification(bolusAmount: HKQuantity, completion: @escaping (Bool, String?) -> Void) {
         let bolusAmountDecimal = Decimal(bolusAmount.doubleValue(for: .internationalUnit()))
         let payload = CommandPayload(

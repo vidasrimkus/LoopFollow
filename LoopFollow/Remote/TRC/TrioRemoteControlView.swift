@@ -16,7 +16,7 @@ struct TrioRemoteControlView: View {
     @State private var selection: TRCScreen?
 
     enum TRCScreen: Hashable, CaseIterable {
-        case meal, bolus, tempTarget, overrides, dosingMode, basalProfiles
+        case meal, bolus, tempTarget, overrides, dosingMode, basalProfiles, carbRatioProfiles, isfProfiles
     }
 
     var body: some View {
@@ -34,6 +34,8 @@ struct TrioRemoteControlView: View {
                     tile("Overrides", "slider.horizontal.3", .overrides, isActive: activeOverrideNote.value != nil)
                     tile("Dosing Mode", "dial.medium", .dosingMode, isActive: isNonClosedMode)
                     tile("Basal Profiles", "chart.bar.xaxis", .basalProfiles)
+                    tile("CR Profiles", "fork.knife.circle", .carbRatioProfiles)
+                    tile("ISF Profiles", "drop.circle", .isfProfiles)
                 }
                 .padding(.horizontal)
 
@@ -73,6 +75,8 @@ struct TrioRemoteControlView: View {
         case .overrides: OverrideView()
         case .dosingMode: DosingModeView()
         case .basalProfiles: BasalProfilesView()
+        case .carbRatioProfiles: TherapyProfilesView(kind: .carbRatio)
+        case .isfProfiles: TherapyProfilesView(kind: .isf)
         }
     }
 

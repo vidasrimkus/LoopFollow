@@ -61,6 +61,11 @@ struct CommandPayload: Encodable {
     var basalSchedule: [BasalScheduleSegment]?
     var basalScheduleName: String?
     var expectedActiveHash: String?
+    /// set_carb_ratios / set_isf only (contract cr-isf): the schedule and its name; `expected_active_hash` above is
+    /// the CR hash / ISF Nightscout-form hash. nil is not encoded, so no other command carries these keys.
+    var carbRatioSchedule: [CarbRatioScheduleEntry]?
+    var isfSchedule: [ISFScheduleEntry]?
+    var scheduleName: String?
     var returnNotification: ReturnNotificationInfo?
 
     struct ReturnNotificationInfo: Encodable {
@@ -97,6 +102,9 @@ struct CommandPayload: Encodable {
         case basalSchedule = "basal_schedule"
         case basalScheduleName = "basal_schedule_name"
         case expectedActiveHash = "expected_active_hash"
+        case carbRatioSchedule = "carb_ratio_schedule"
+        case isfSchedule = "isf_schedule"
+        case scheduleName = "schedule_name"
         case returnNotification = "return_notification"
     }
 }
