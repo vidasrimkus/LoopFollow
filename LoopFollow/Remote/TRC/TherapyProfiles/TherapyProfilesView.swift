@@ -134,6 +134,14 @@ enum TherapyChange {
         return lines
     }
 
+    /// The schedule as the confirmation lists it: "HH:MM  value" (Trio phone time; ISF in mmol/L with its mg/dL),
+    /// headed by the time-zone note.
+    static func scheduleLines(_ profile: TherapyProfile, mmol: Bool) -> [String] {
+        ["Laikai — Trio telefono laikas:"] + TherapyProfileMath.merged(profile.entries).map {
+            "\(TherapyProfileMath.clock($0.minutes))  \(TherapyProfileMath.fullText($0.value, kind: profile.kind, mmol: mmol))"
+        }
+    }
+
     /// Extra warning when any slot changes by more than 20 %.
     static func bigChangeWarning(_ rows: [TherapyProfileMath.ComparisonRow], kind: TherapyKind) -> String? {
         guard let big = TherapyProfileMath.largestChange(rows) else { return nil }
@@ -302,7 +310,7 @@ struct CurrentTherapyView: View {
                         Text("Neatitinka nė vieno išsaugoto profilio.").foregroundColor(.orange)
                     }
                 }
-                Section(header: Text("Laikas | \(TherapyProfileMath.unit(snapshot.kind, mmol: mmol))")) {
+                Section(header: Text("Laikas (Trio telefono laikas) | \(TherapyProfileMath.unit(snapshot.kind, mmol: mmol))")) {
                     ForEach(Array(TherapyProfileMath.slotSegments(slots).enumerated()), id: \.offset) { _, row in
                         HStack {
                             Text(TherapyProfileMath.clock(row.minutes))
@@ -435,7 +443,7 @@ struct TherapyProfilesView: View {
     }
 
     private var currentSection: some View {
-        Section(header: Text("Dabar Trio'je")) {
+        Section(header: Text("Dabar Trio'je"), footer: Text("Laikai — Trio telefono laikas, ne šio telefono.")) {
             if let slots = active.displaySlots(mmol: mmol) {
                 Button {
                     ui.currentView = CurrentTherapyRequest(snapshot: active, capturedAt: Date(), mmol: mmol)
@@ -636,11 +644,8 @@ struct TherapyProfileEditorView: View {
                 Form {
                     Section(header: Text("Pavadinimas")) { TextField("Pavadinimas", text: nameBinding) }
                     Section(
-                        header: Text("Laikas | \(unit)"),
-                        footer: Text(kind == .carbRatio
-                            ? "1.0–50.0 g/U, žingsnis 0.1. Mažesnis CR = daugiau insulino."
-                            : (mmol ? "0.5–30.0 mmol/L, žingsnis 0.1 (saugoma mg/dL). " : "9–540 mg/dL, žingsnis 1. ")
-                            + "Mažesnis ISF = daugiau insulino.")
+                        header: Text("Laikas (Trio telefono laikas) | \(unit)"),
+                        footer: Text(editorFooter(kind: kind, mmol: mmol))
                     ) {
                         ForEach(draft.rows) { row in
                             HStack {
@@ -703,6 +708,13 @@ struct TherapyProfileEditorView: View {
         }
     }
 
+    private func editorFooter(kind: TherapyKind, mmol: Bool) -> String {
+        let range = kind == .carbRatio
+            ? "1.0–50.0 g/U, žingsnis 0.1."
+            : (mmol ? "0.5–30.0 mmol/L, žingsnis 0.1 (saugoma mg/dL)." : "9–540 mg/dL, žingsnis 1.")
+        return "\(range) Mažesnis \(kind.shortName) = daugiau insulino.\nLaikai — Trio telefono laikas, ne šio telefono."
+    }
+
     private func addRow() {
         guard let draft = ui.editing, let minutes = draft.nextFreeMinutes() else { return }
         let source = draft.rows.last { $0.minutes < minutes } ?? draft.rows.last
@@ -749,7 +761,10 @@ struct TherapyProfileActivationView: View {
                         .foregroundColor(.orange)
                 }
             }
-            Section(header: Text("Laikas | dabar (\(BasalProfileFormat.clock(capturedAt))) | naujas | Δ, \(unit)")) {
+            Section(
+                header: Text("Laikas (Trio telefono laikas) | dabar (nuskaityta \(BasalProfileFormat.clock(capturedAt))) | naujas | Δ, \(unit)"),
+                footer: Text("Laikai — Trio telefono laikas, ne šio telefono.")
+            ) {
                 ForEach(rows, id: \.minutes) { row in
                     HStack(alignment: .firstTextBaseline) {
                         Text(TherapyProfileMath.clock(row.minutes))
@@ -770,7 +785,7 @@ struct TherapyProfileActivationView: View {
                 }
             }
             if kind == .isf, mmol {
-                Section(header: Text("Bus išsaugota (mg/dL)")) {
+                Section(header: Text("Bus išsaugota (mg/dL), Trio telefono laikas")) {
                     ForEach(TherapyProfileMath.merged(profile.entries), id: \.minutes) { entry in
                         HStack {
                             Text(TherapyProfileMath.clock(entry.minutes))
@@ -837,10 +852,7 @@ struct TherapyProfileActivationView: View {
     private func prepareConfirmation() {
         let current = ActiveTherapySnapshot.current(kind)
         let rows = TherapyChange.rows(profile: profile, active: current, mmol: mmol)
-        var text = profile.name + "\n"
-        text += TherapyProfileMath.merged(profile.entries)
-            .map { "\(TherapyProfileMath.clock($0.minutes))  \(TherapyProfileMath.fullText($0.value, kind: kind, mmol: mmol))" }
-            .joined(separator: "\n")
+        var text = profile.name + "\n" + TherapyChange.scheduleLines(profile, mmol: mmol).joined(separator: "\n")
         let lines = TherapyChange.directionLines(rows, kind: kind)
         if !lines.isEmpty { text += "\n\n" + lines.joined(separator: "\n") }
         text += "\n\nTrio išsaugos naują \(kind.shortName) grafiką."

@@ -388,4 +388,107 @@ struct TherapyProfileTests {
         let isf1Profile = original(.isf)
         #expect(TherapyActiveMarker.rowState(isf1Profile, activeID: isf1Profile.id, nsHash: "2d0d147868c7adf5", nsMgdl: false) == .active)
     }
+
+    // MARK: Units end to end
+
+    @Test("ISF 90 mg/dL: sent as \"sensitivity\":90 whatever the app unit; 5.0 mmol/L → 90; confirmation shows both units")
+    func isf90EndToEnd() throws {
+        let profile = TherapyProfile(kind: .isf, name: "ISF90", entries: e([("00:00", 90)]))
+        #expect(TherapyProfileMath.mgdl(fromMmolTenths: 50) == 90 && TherapyProfileMath.mmolTenths(mgdl: 90) == 50)
+
+        for mmol in [false, true] {
+            var draft = TherapyProfileDraft(TherapyProfile(kind: .isf, name: "ISF90", entries: e([("00:00", 180)])), mmol: mmol)
+            draft.rows[0].text = mmol ? "5.0" : "90"
+            #expect(draft.parsed().problems.isEmpty)
+            #expect(draft.parsed().entries == profile.entries)
+            #expect(TherapyProfileDraft(profile, mmol: mmol).rows[0].text == (mmol ? "5.0" : "90"))
+
+            let payload = CommandPayload(
+                user: "u", commandType: .setISF, timestamp: 1, expectedActiveHash: "0000000000000000",
+                isfSchedule: TherapyProfileMath.isfSchedule(draft.parsed().entries), scheduleName: "ISF90"
+            )
+            let text = try #require(String(data: JSONEncoder().encode(payload), encoding: .utf8))
+            #expect(text.contains("\"sensitivity\":90"))
+            #expect(!text.contains("\"sensitivity\":5") && !text.contains("1620") && !text.contains("0.28"))
+        }
+        #expect(TherapyChange.scheduleLines(profile, mmol: true).contains("00:00  5.0 mmol/L (90 mg/dL)"))
+        #expect(TherapyChange.scheduleLines(profile, mmol: false).contains("00:00  90 mg/dL"))
+    }
+}
+
+/// Schedule starts are minutes from midnight in Trio's local time and never pass through a TimeZone: the same
+/// Nightscout entries give the same entries, slots, hashes and sent start strings in any time zone of this phone.
+/// Serialized, and the default time zone is restored afterwards.
+@Suite(.serialized)
+struct TherapyTimeZoneTests {
+    static let zones = ["UTC", "Europe/Vilnius", "Asia/Tokyo", "America/New_York"]
+
+    private func starts(_ payload: CommandPayload, key: String) throws -> [String] {
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(payload)) as? [String: Any])
+        let list = try #require(json[key] as? [[String: Any]])
+        return list.compactMap { $0["start"] as? String }
+    }
+
+    /// Everything time-related this feature and basal compute from Nightscout, as one comparable text.
+    private func signature() throws -> [String] {
+        // CR (CR3, 07:30 change) from Nightscout doubles
+        let crNS: [(seconds: Int, value: Double)] = [(0, 9.0), (27000, 7.5), (72000, 11.0)]
+        let cr = try #require(TherapyProfileMath.storedEntries(fromNightscout: crNS, kind: .carbRatio, nsMgdl: false))
+        let crStarts = try starts(
+            CommandPayload(user: "u", commandType: .setCarbRatios, timestamp: 1, carbRatioSchedule: TherapyProfileMath.carbRatioSchedule(cr)),
+            key: "carb_ratio_schedule"
+        )
+        // ISF in mmol/L (ISF1) and in mg/dL with a 07:30 change
+        let isfNS: [(seconds: Int, value: Double)] = [(0, 10.0), (28800, 8.3), (79200, 11.1)]
+        let isfMgdlNS: [(seconds: Int, value: Double)] = [(0, 180), (27000, 150)]
+        let isf = try #require(TherapyProfileMath.storedEntries(fromNightscout: isfMgdlNS, kind: .isf, nsMgdl: true))
+        let isfStarts = try starts(
+            CommandPayload(user: "u", commandType: .setISF, timestamp: 1, isfSchedule: TherapyProfileMath.isfSchedule(isf)),
+            key: "isf_schedule"
+        )
+        // Basal: Trio vector V1 (hourly segments) and V4 (02:30 change)
+        let basalV1: [(seconds: Int, rate: Double)] = [
+            (0, 0.4), (7200, 0.55), (10800, 0.55), (18000, 0.6), (21600, 0.6), (28800, 0.6),
+            (36000, 0.7), (46800, 0.4), (68400, 0.45),
+        ]
+        let hourly = try #require(BasalProfileMath.hourly(fromNightscout: basalV1))
+        let basalStarts = try starts(
+            CommandPayload(user: "u", commandType: .setBasalSchedule, timestamp: 1, basalSchedule: BasalProfileMath.segments(hourly)),
+            key: "basal_schedule"
+        )
+        let basalV4: [(seconds: Int, rate: Double)] = [(0, 0.4), (9000, 0.5), (18000, 0.6)]
+
+        #expect(crStarts == ["00:00", "07:30", "20:00"])
+        #expect(isfStarts == ["00:00", "07:30"])
+        #expect(basalStarts == ["00:00", "02:00", "05:00", "10:00", "13:00", "19:00"])
+        #expect(TherapyProfileMath.nightscoutHash(crNS, kind: .carbRatio, nsMgdl: false) == "82bc62b67556f34a")
+        #expect(TherapyProfileMath.nightscoutHash(isfNS, kind: .isf, nsMgdl: false) == "2d0d147868c7adf5")
+        #expect(BasalProfileMath.hash(ofNightscout: basalV1) == "5c367b5397636149")
+        #expect(BasalProfileMath.hash(ofNightscout: basalV4) == "acff0d328fca2e73")
+
+        return [
+            crStarts.joined(separator: ","), isfStarts.joined(separator: ","), basalStarts.joined(separator: ","),
+            TherapyProfileMath.slots(cr).map(String.init).joined(separator: ","),
+            TherapyProfileMath.nightscoutSlots(isfNS, kind: .isf, nsMgdl: false).map(String.init).joined(separator: ","),
+            BasalProfileMath.nightscoutSlots(basalV4).map(String.init).joined(separator: ","),
+            ActiveTherapySnapshot(kind: .isf, entries: isfNS, nsMgdl: false, loadedAt: 0).hash ?? "",
+            ActiveBasalSnapshot(entries: basalV4, loadedAt: 0).hash ?? "",
+            TherapyProfileMath.clock(450),
+        ]
+    }
+
+    @Test("UTC, Vilnius, Tokyo, New York: same entries, slots, hashes and start strings (CR, ISF, basal)")
+    func sameInEveryTimeZone() throws {
+        let saved = NSTimeZone.default
+        defer { NSTimeZone.default = saved }
+        var results: [[String]] = []
+        for id in Self.zones {
+            NSTimeZone.default = try #require(TimeZone(identifier: id))
+            #expect(NSTimeZone.default.identifier == id)
+            results.append(try signature())
+        }
+        #expect(results.count == Self.zones.count)
+        #expect(results.allSatisfy { $0 == results[0] })
+        #expect(results[0].last == "07:30")
+    }
 }
